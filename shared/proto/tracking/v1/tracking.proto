@@ -1,0 +1,305 @@
+syntax = "proto3";
+
+package tracking.v1;
+
+option go_package = "github.com/draymaster/shared/proto/tracking/v1;trackingv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Tracking Service - GPS tracking, milestones, ETAs
+service TrackingService {
+  // Location Tracking
+  rpc RecordLocation(RecordLocationRequest) returns (LocationRecord);
+  rpc GetCurrentLocation(GetCurrentLocationRequest) returns (CurrentLocation);
+  rpc GetLocationHistory(GetLocationHistoryRequest) returns (GetLocationHistoryResponse);
+  rpc StreamLocations(StreamLocationsRequest) returns (stream LocationUpdate);
+  
+  // Fleet Map
+  rpc GetFleetLocations(GetFleetLocationsRequest) returns (GetFleetLocationsResponse);
+  
+  // ETA
+  rpc GetTripETA(GetTripETARequest) returns (TripETA);
+  rpc CalculateETA(CalculateETARequest) returns (CalculateETAResponse);
+  
+  // Milestones
+  rpc RecordMilestone(RecordMilestoneRequest) returns (Milestone);
+  rpc GetTripMilestones(GetTripMilestonesRequest) returns (GetTripMilestonesResponse);
+  
+  // Geofencing
+  rpc CreateGeofence(CreateGeofenceRequest) returns (Geofence);
+  rpc CheckGeofence(CheckGeofenceRequest) returns (CheckGeofenceResponse);
+  
+  // Container Tracking
+  rpc GetContainerLocation(GetContainerLocationRequest) returns (ContainerLocation);
+  rpc GetContainerHistory(GetContainerHistoryRequest) returns (GetContainerHistoryResponse);
+}
+
+// Enums
+enum MilestoneType {
+  MILESTONE_TYPE_UNSPECIFIED = 0;
+  MILESTONE_TYPE_TRIP_STARTED = 1;
+  MILESTONE_TYPE_DEPARTED_ORIGIN = 2;
+  MILESTONE_TYPE_ARRIVED_STOP = 3;
+  MILESTONE_TYPE_DEPARTED_STOP = 4;
+  MILESTONE_TYPE_GATE_IN = 5;
+  MILESTONE_TYPE_GATE_OUT = 6;
+  MILESTONE_TYPE_LOADED = 7;
+  MILESTONE_TYPE_UNLOADED = 8;
+  MILESTONE_TYPE_DELIVERED = 9;
+  MILESTONE_TYPE_TRIP_COMPLETED = 10;
+  MILESTONE_TYPE_EXCEPTION = 11;
+}
+
+enum GeofenceType {
+  GEOFENCE_TYPE_UNSPECIFIED = 0;
+  GEOFENCE_TYPE_CIRCLE = 1;
+  GEOFENCE_TYPE_POLYGON = 2;
+}
+
+// Messages
+message LocationRecord {
+  string id = 1;
+  string driver_id = 2;
+  string tractor_id = 3;
+  string trip_id = 4;
+  double latitude = 5;
+  double longitude = 6;
+  double speed_mph = 7;
+  double heading = 8;
+  double accuracy_meters = 9;
+  string source = 10;  // eld, mobile, gps
+  google.protobuf.Timestamp recorded_at = 11;
+  google.protobuf.Timestamp received_at = 12;
+}
+
+message CurrentLocation {
+  string driver_id = 1;
+  string driver_name = 2;
+  string tractor_id = 3;
+  string tractor_unit = 4;
+  string trip_id = 5;
+  string trip_number = 6;
+  double latitude = 7;
+  double longitude = 8;
+  double speed_mph = 9;
+  double heading = 10;
+  string status = 11;  // moving, stopped, idle
+  string current_stop_name = 12;
+  int32 current_stop_sequence = 13;
+  google.protobuf.Timestamp last_update = 14;
+}
+
+message LocationUpdate {
+  string driver_id = 1;
+  string trip_id = 2;
+  double latitude = 3;
+  double longitude = 4;
+  double speed_mph = 5;
+  double heading = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message TripETA {
+  string trip_id = 1;
+  repeated StopETA stops = 2;
+  google.protobuf.Timestamp calculated_at = 3;
+  string traffic_conditions = 4;  // light, moderate, heavy
+}
+
+message StopETA {
+  string stop_id = 1;
+  int32 sequence = 2;
+  string location_name = 3;
+  google.protobuf.Timestamp scheduled_time = 4;
+  google.protobuf.Timestamp estimated_arrival = 5;
+  int32 variance_minutes = 6;  // positive = late, negative = early
+  double remaining_miles = 7;
+  int32 remaining_minutes = 8;
+  string status = 9;  // on_time, at_risk, late
+}
+
+message Milestone {
+  string id = 1;
+  string trip_id = 2;
+  string stop_id = 3;
+  MilestoneType type = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  double latitude = 6;
+  double longitude = 7;
+  string location_id = 8;
+  string location_name = 9;
+  string container_id = 10;
+  string container_number = 11;
+  map<string, string> metadata = 12;
+  string source = 13;  // auto, manual, geofence
+  string recorded_by = 14;
+}
+
+message Geofence {
+  string id = 1;
+  string location_id = 2;
+  string name = 3;
+  GeofenceType type = 4;
+  double center_latitude = 5;
+  double center_longitude = 6;
+  double radius_meters = 7;  // For circle type
+  repeated Coordinate polygon = 8;  // For polygon type
+  bool is_active = 9;
+}
+
+message Coordinate {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+message ContainerLocation {
+  string container_id = 1;
+  string container_number = 2;
+  string location_type = 3;  // vessel, terminal, transit, customer, yard
+  string location_id = 4;
+  string location_name = 5;
+  double latitude = 6;
+  double longitude = 7;
+  string status = 8;
+  google.protobuf.Timestamp last_update = 9;
+  string current_trip_id = 10;
+  string driver_name = 11;
+}
+
+// Requests
+message RecordLocationRequest {
+  string driver_id = 1;
+  string tractor_id = 2;
+  string trip_id = 3;
+  double latitude = 4;
+  double longitude = 5;
+  double speed_mph = 6;
+  double heading = 7;
+  double accuracy_meters = 8;
+  string source = 9;
+  google.protobuf.Timestamp recorded_at = 10;
+}
+
+message GetCurrentLocationRequest {
+  string driver_id = 1;
+  string tractor_id = 2;
+  string trip_id = 3;
+}
+
+message GetLocationHistoryRequest {
+  string driver_id = 1;
+  string trip_id = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+  int32 interval_seconds = 5;  // Downsample interval
+}
+
+message GetLocationHistoryResponse {
+  repeated LocationRecord locations = 1;
+  int32 total_points = 2;
+}
+
+message StreamLocationsRequest {
+  repeated string driver_ids = 1;
+  repeated string trip_ids = 2;
+}
+
+message GetFleetLocationsRequest {
+  repeated string driver_ids = 1;
+  string status_filter = 2;  // all, active, idle
+}
+
+message GetFleetLocationsResponse {
+  repeated CurrentLocation locations = 1;
+  int32 total_active = 2;
+  google.protobuf.Timestamp as_of = 3;
+}
+
+message GetTripETARequest {
+  string trip_id = 1;
+}
+
+message CalculateETARequest {
+  double origin_latitude = 1;
+  double origin_longitude = 2;
+  double destination_latitude = 3;
+  double destination_longitude = 4;
+  google.protobuf.Timestamp departure_time = 5;
+  bool include_traffic = 6;
+}
+
+message CalculateETAResponse {
+  google.protobuf.Timestamp eta = 1;
+  int32 duration_minutes = 2;
+  double distance_miles = 3;
+  string traffic_conditions = 4;
+}
+
+message RecordMilestoneRequest {
+  string trip_id = 1;
+  string stop_id = 2;
+  MilestoneType type = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  double latitude = 5;
+  double longitude = 6;
+  string container_id = 7;
+  map<string, string> metadata = 8;
+  string source = 9;
+}
+
+message GetTripMilestonesRequest {
+  string trip_id = 1;
+  string container_id = 2;
+}
+
+message GetTripMilestonesResponse {
+  repeated Milestone milestones = 1;
+}
+
+message CreateGeofenceRequest {
+  string location_id = 1;
+  string name = 2;
+  GeofenceType type = 3;
+  double center_latitude = 4;
+  double center_longitude = 5;
+  double radius_meters = 6;
+  repeated Coordinate polygon = 7;
+}
+
+message CheckGeofenceRequest {
+  string geofence_id = 1;
+  double latitude = 2;
+  double longitude = 3;
+}
+
+message CheckGeofenceResponse {
+  bool is_inside = 1;
+  double distance_meters = 2;
+}
+
+message GetContainerLocationRequest {
+  string container_id = 1;
+  string container_number = 2;
+}
+
+message GetContainerHistoryRequest {
+  string container_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+}
+
+message GetContainerHistoryResponse {
+  string container_id = 1;
+  string container_number = 2;
+  repeated ContainerEvent events = 3;
+}
+
+message ContainerEvent {
+  google.protobuf.Timestamp timestamp = 1;
+  string event_type = 2;
+  string location_type = 3;
+  string location_name = 4;
+  double latitude = 5;
+  double longitude = 6;
+  string details = 7;
+}

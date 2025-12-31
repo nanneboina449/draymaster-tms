@@ -1,0 +1,417 @@
+syntax = "proto3";
+
+package dispatch.v1;
+
+option go_package = "github.com/draymaster/shared/proto/dispatch/v1;dispatchv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Dispatch Service - Manages trips, assignments, and street turns
+service DispatchService {
+  // Trips
+  rpc CreateTrip(CreateTripRequest) returns (Trip);
+  rpc GetTrip(GetTripRequest) returns (Trip);
+  rpc ListTrips(ListTripsRequest) returns (ListTripsResponse);
+  rpc UpdateTrip(UpdateTripRequest) returns (Trip);
+  rpc UpdateTripStatus(UpdateTripStatusRequest) returns (Trip);
+  
+  // Trip Stops
+  rpc UpdateStopStatus(UpdateStopStatusRequest) returns (TripStop);
+  rpc RecordStopArrival(RecordStopArrivalRequest) returns (TripStop);
+  rpc CompleteStop(CompleteStopRequest) returns (TripStop);
+  
+  // Driver Assignment
+  rpc AssignDriver(AssignDriverRequest) returns (Trip);
+  rpc UnassignDriver(UnassignDriverRequest) returns (Trip);
+  rpc DispatchTrip(DispatchTripRequest) returns (Trip);
+  
+  // Street Turns
+  rpc FindStreetTurnOpportunities(FindStreetTurnRequest) returns (FindStreetTurnResponse);
+  rpc CreateStreetTurn(CreateStreetTurnRequest) returns (Trip);
+  
+  // Dispatch Board
+  rpc GetDispatchBoard(GetDispatchBoardRequest) returns (DispatchBoard);
+  rpc GetDriverAvailability(GetDriverAvailabilityRequest) returns (GetDriverAvailabilityResponse);
+}
+
+// Enums
+enum TripType {
+  TRIP_TYPE_UNSPECIFIED = 0;
+  TRIP_TYPE_LIVE_LOAD = 1;
+  TRIP_TYPE_LIVE_UNLOAD = 2;
+  TRIP_TYPE_DROP_HOOK_SAME = 3;
+  TRIP_TYPE_DROP_HOOK_DIFF = 4;
+  TRIP_TYPE_DROP_ONLY = 5;
+  TRIP_TYPE_STREET_TURN = 6;
+  TRIP_TYPE_DUAL_TRANSACTION = 7;
+  TRIP_TYPE_BOBTAIL = 8;
+  TRIP_TYPE_EMPTY_PICKUP = 9;
+  TRIP_TYPE_EMPTY_RETURN = 10;
+  TRIP_TYPE_PRE_PULL = 11;
+  TRIP_TYPE_TRANSLOAD = 12;
+}
+
+enum TripStatus {
+  TRIP_STATUS_UNSPECIFIED = 0;
+  TRIP_STATUS_DRAFT = 1;
+  TRIP_STATUS_PLANNED = 2;
+  TRIP_STATUS_ASSIGNED = 3;
+  TRIP_STATUS_DISPATCHED = 4;
+  TRIP_STATUS_EN_ROUTE = 5;
+  TRIP_STATUS_IN_PROGRESS = 6;
+  TRIP_STATUS_COMPLETED = 7;
+  TRIP_STATUS_CANCELLED = 8;
+  TRIP_STATUS_FAILED = 9;
+}
+
+enum StopType {
+  STOP_TYPE_UNSPECIFIED = 0;
+  STOP_TYPE_PICKUP = 1;
+  STOP_TYPE_DELIVERY = 2;
+  STOP_TYPE_RETURN = 3;
+  STOP_TYPE_YARD = 4;
+}
+
+enum ActivityType {
+  ACTIVITY_TYPE_UNSPECIFIED = 0;
+  ACTIVITY_TYPE_PICKUP_LOADED = 1;
+  ACTIVITY_TYPE_PICKUP_EMPTY = 2;
+  ACTIVITY_TYPE_DELIVER_LOADED = 3;
+  ACTIVITY_TYPE_DROP_LOADED = 4;
+  ACTIVITY_TYPE_DROP_EMPTY = 5;
+  ACTIVITY_TYPE_HOOK_EMPTY = 6;
+  ACTIVITY_TYPE_LIVE_LOAD = 7;
+  ACTIVITY_TYPE_LIVE_UNLOAD = 8;
+  ACTIVITY_TYPE_CHASSIS_PICKUP = 9;
+  ACTIVITY_TYPE_CHASSIS_DROP = 10;
+  ACTIVITY_TYPE_FUEL_STOP = 11;
+  ACTIVITY_TYPE_SCALE = 12;
+  ACTIVITY_TYPE_CUSTOMS_EXAM = 13;
+}
+
+enum StopStatus {
+  STOP_STATUS_UNSPECIFIED = 0;
+  STOP_STATUS_PENDING = 1;
+  STOP_STATUS_EN_ROUTE = 2;
+  STOP_STATUS_ARRIVED = 3;
+  STOP_STATUS_IN_PROGRESS = 4;
+  STOP_STATUS_COMPLETED = 5;
+  STOP_STATUS_FAILED = 6;
+  STOP_STATUS_SKIPPED = 7;
+}
+
+// Messages
+message Trip {
+  string id = 1;
+  string trip_number = 2;
+  TripType type = 3;
+  TripStatus status = 4;
+  
+  // Driver & Equipment
+  string driver_id = 5;
+  Driver driver = 6;
+  string tractor_id = 7;
+  Tractor tractor = 8;
+  string chassis_id = 9;
+  
+  // Stops
+  repeated TripStop stops = 10;
+  int32 current_stop_sequence = 11;
+  
+  // Linked orders
+  repeated string order_ids = 12;
+  
+  // Timing
+  google.protobuf.Timestamp planned_start_time = 13;
+  google.protobuf.Timestamp actual_start_time = 14;
+  google.protobuf.Timestamp planned_end_time = 15;
+  google.protobuf.Timestamp actual_end_time = 16;
+  int32 estimated_duration_minutes = 17;
+  
+  // Distance
+  double total_miles = 18;
+  double completed_miles = 19;
+  
+  // Flags
+  bool is_street_turn = 20;
+  bool is_dual_transaction = 21;
+  string street_turn_linked_trip_id = 22;
+  
+  // Metadata
+  google.protobuf.Timestamp created_at = 23;
+  google.protobuf.Timestamp updated_at = 24;
+  string created_by = 25;
+}
+
+message TripStop {
+  string id = 1;
+  string trip_id = 2;
+  int32 sequence = 3;
+  StopType type = 4;
+  ActivityType activity = 5;
+  StopStatus status = 6;
+  
+  // Location
+  string location_id = 7;
+  Location location = 8;
+  
+  // Container
+  string container_id = 9;
+  string container_number = 10;
+  string order_id = 11;
+  
+  // Appointment
+  google.protobuf.Timestamp appointment_time = 12;
+  string appointment_number = 13;
+  int32 appointment_window_minutes = 14;
+  
+  // Timing
+  google.protobuf.Timestamp planned_arrival = 15;
+  google.protobuf.Timestamp actual_arrival = 16;
+  google.protobuf.Timestamp actual_departure = 17;
+  int32 estimated_duration_minutes = 18;
+  int32 actual_duration_minutes = 19;
+  
+  // Detention
+  int32 free_time_minutes = 20;
+  google.protobuf.Timestamp detention_start_time = 21;
+  int32 detention_minutes = 22;
+  
+  // Equipment changes
+  string chassis_in_id = 23;
+  string chassis_out_id = 24;
+  string container_in_id = 25;
+  string container_out_id = 26;
+  
+  // Documentation
+  string gate_ticket_number = 27;
+  string seal_number = 28;
+  repeated string document_ids = 29;
+  
+  // Failure
+  string failure_reason = 30;
+  string notes = 31;
+}
+
+message Location {
+  string id = 1;
+  string name = 2;
+  string type = 3;  // terminal, warehouse, yard, etc.
+  string address = 4;
+  string city = 5;
+  string state = 6;
+  string zip = 7;
+  double latitude = 8;
+  double longitude = 9;
+  string contact_name = 10;
+  string contact_phone = 11;
+  string geofence_id = 12;
+}
+
+message Driver {
+  string id = 1;
+  string name = 2;
+  string phone = 3;
+  string status = 4;
+  double current_latitude = 5;
+  double current_longitude = 6;
+  int32 available_drive_minutes = 7;
+  int32 available_duty_minutes = 8;
+}
+
+message Tractor {
+  string id = 1;
+  string unit_number = 2;
+  string status = 3;
+}
+
+message StreetTurnOpportunity {
+  string import_order_id = 1;
+  string import_order_number = 2;
+  string import_container_number = 3;
+  string import_consignee_name = 4;
+  Location import_delivery_location = 5;
+  
+  string export_order_id = 6;
+  string export_order_number = 7;
+  string export_shipper_name = 8;
+  Location export_pickup_location = 9;
+  
+  string steamship_line = 10;
+  string container_size = 11;
+  string container_type = 12;
+  
+  double distance_miles = 13;
+  double estimated_savings = 14;
+  int32 match_score = 15;
+  
+  google.protobuf.Timestamp import_delivery_date = 16;
+  google.protobuf.Timestamp export_pickup_date = 17;
+}
+
+message DispatchBoard {
+  repeated Trip unassigned = 1;
+  repeated Trip assigned = 2;
+  repeated Trip dispatched = 3;
+  repeated Trip in_progress = 4;
+  repeated Trip completed = 5;
+  repeated Trip failed = 6;
+  
+  int32 total_trips = 7;
+  google.protobuf.Timestamp as_of = 8;
+}
+
+message DriverAvailability {
+  string driver_id = 1;
+  string driver_name = 2;
+  string status = 3;
+  double latitude = 4;
+  double longitude = 5;
+  int32 available_drive_minutes = 6;
+  int32 available_duty_minutes = 7;
+  string current_trip_id = 8;
+  google.protobuf.Timestamp current_trip_eta = 9;
+  double distance_to_pickup_miles = 10;
+  int32 eta_to_pickup_minutes = 11;
+  repeated string endorsements = 12;
+  bool has_twic = 13;
+}
+
+// Requests
+message CreateTripRequest {
+  TripType type = 1;
+  repeated TripStopInput stops = 2;
+  repeated string order_ids = 3;
+  google.protobuf.Timestamp planned_start_time = 4;
+  string driver_id = 5;  // Optional initial assignment
+  string tractor_id = 6;
+}
+
+message TripStopInput {
+  int32 sequence = 1;
+  StopType type = 2;
+  ActivityType activity = 3;
+  string location_id = 4;
+  string container_id = 5;
+  string order_id = 6;
+  google.protobuf.Timestamp appointment_time = 7;
+  string appointment_number = 8;
+  int32 estimated_duration_minutes = 9;
+  int32 free_time_minutes = 10;
+}
+
+message GetTripRequest {
+  string id = 1;
+  string trip_number = 2;
+}
+
+message ListTripsRequest {
+  TripStatus status = 1;
+  TripType type = 2;
+  string driver_id = 3;
+  string customer_id = 4;
+  google.protobuf.Timestamp date_from = 5;
+  google.protobuf.Timestamp date_to = 6;
+  int32 page = 7;
+  int32 page_size = 8;
+}
+
+message ListTripsResponse {
+  repeated Trip trips = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateTripRequest {
+  string id = 1;
+  repeated TripStopInput stops = 2;
+  google.protobuf.Timestamp planned_start_time = 3;
+}
+
+message UpdateTripStatusRequest {
+  string id = 1;
+  TripStatus status = 2;
+  string reason = 3;
+}
+
+message UpdateStopStatusRequest {
+  string trip_id = 1;
+  string stop_id = 2;
+  StopStatus status = 3;
+  string notes = 4;
+}
+
+message RecordStopArrivalRequest {
+  string trip_id = 1;
+  string stop_id = 2;
+  google.protobuf.Timestamp arrival_time = 3;
+  double latitude = 4;
+  double longitude = 5;
+}
+
+message CompleteStopRequest {
+  string trip_id = 1;
+  string stop_id = 2;
+  google.protobuf.Timestamp departure_time = 3;
+  string gate_ticket_number = 4;
+  string seal_number = 5;
+  string chassis_id = 6;
+  string container_number = 7;
+  repeated string document_ids = 8;
+  string notes = 9;
+}
+
+message AssignDriverRequest {
+  string trip_id = 1;
+  string driver_id = 2;
+  string tractor_id = 3;
+}
+
+message UnassignDriverRequest {
+  string trip_id = 1;
+  string reason = 2;
+}
+
+message DispatchTripRequest {
+  string trip_id = 1;
+  google.protobuf.Timestamp dispatch_time = 2;
+}
+
+message FindStreetTurnRequest {
+  string import_order_id = 1;  // Find exports matching this import
+  string export_order_id = 2;  // Find imports matching this export
+  string steamship_line_id = 3;
+  string container_size = 4;
+  int32 max_distance_miles = 5;
+  int32 max_results = 6;
+}
+
+message FindStreetTurnResponse {
+  repeated StreetTurnOpportunity opportunities = 1;
+}
+
+message CreateStreetTurnRequest {
+  string import_order_id = 1;
+  string export_order_id = 2;
+  string driver_id = 3;
+  google.protobuf.Timestamp planned_start_time = 4;
+}
+
+message GetDispatchBoardRequest {
+  google.protobuf.Timestamp date = 1;
+  string dispatcher_id = 2;
+}
+
+message GetDriverAvailabilityRequest {
+  double pickup_latitude = 1;
+  double pickup_longitude = 2;
+  google.protobuf.Timestamp pickup_time = 3;
+  int32 required_drive_minutes = 4;
+  repeated string required_endorsements = 5;
+  bool require_twic = 6;
+}
+
+message GetDriverAvailabilityResponse {
+  repeated DriverAvailability drivers = 1;
+}

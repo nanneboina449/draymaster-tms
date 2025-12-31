@@ -1,0 +1,365 @@
+syntax = "proto3";
+
+package order.v1;
+
+option go_package = "github.com/draymaster/shared/proto/order/v1;orderv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Order Service - Manages shipments, containers, and orders
+service OrderService {
+  // Shipments
+  rpc CreateShipment(CreateShipmentRequest) returns (Shipment);
+  rpc GetShipment(GetShipmentRequest) returns (Shipment);
+  rpc ListShipments(ListShipmentsRequest) returns (ListShipmentsResponse);
+  rpc UpdateShipment(UpdateShipmentRequest) returns (Shipment);
+  
+  // Containers
+  rpc AddContainers(AddContainersRequest) returns (AddContainersResponse);
+  rpc GetContainer(GetContainerRequest) returns (Container);
+  rpc UpdateContainerStatus(UpdateContainerStatusRequest) returns (Container);
+  rpc CheckContainerAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+  
+  // Orders
+  rpc CreateOrder(CreateOrderRequest) returns (Order);
+  rpc GetOrder(GetOrderRequest) returns (Order);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+  rpc UpdateOrderStatus(UpdateOrderStatusRequest) returns (Order);
+  rpc GenerateOrdersFromShipment(GenerateOrdersRequest) returns (GenerateOrdersResponse);
+}
+
+// Enums
+enum ShipmentType {
+  SHIPMENT_TYPE_UNSPECIFIED = 0;
+  SHIPMENT_TYPE_IMPORT = 1;
+  SHIPMENT_TYPE_EXPORT = 2;
+}
+
+enum ShipmentStatus {
+  SHIPMENT_STATUS_UNSPECIFIED = 0;
+  SHIPMENT_STATUS_PENDING = 1;
+  SHIPMENT_STATUS_IN_PROGRESS = 2;
+  SHIPMENT_STATUS_COMPLETED = 3;
+  SHIPMENT_STATUS_CANCELLED = 4;
+}
+
+enum ContainerSize {
+  CONTAINER_SIZE_UNSPECIFIED = 0;
+  CONTAINER_SIZE_20 = 1;
+  CONTAINER_SIZE_40 = 2;
+  CONTAINER_SIZE_45 = 3;
+}
+
+enum ContainerType {
+  CONTAINER_TYPE_UNSPECIFIED = 0;
+  CONTAINER_TYPE_DRY = 1;
+  CONTAINER_TYPE_HIGH_CUBE = 2;
+  CONTAINER_TYPE_REEFER = 3;
+  CONTAINER_TYPE_TANK = 4;
+  CONTAINER_TYPE_FLAT_RACK = 5;
+  CONTAINER_TYPE_OPEN_TOP = 6;
+}
+
+enum ContainerState {
+  CONTAINER_STATE_UNSPECIFIED = 0;
+  CONTAINER_STATE_LOADED = 1;
+  CONTAINER_STATE_EMPTY = 2;
+}
+
+enum CustomsStatus {
+  CUSTOMS_STATUS_UNSPECIFIED = 0;
+  CUSTOMS_STATUS_PENDING = 1;
+  CUSTOMS_STATUS_HOLD = 2;
+  CUSTOMS_STATUS_RELEASED = 3;
+}
+
+enum LocationType {
+  LOCATION_TYPE_UNSPECIFIED = 0;
+  LOCATION_TYPE_VESSEL = 1;
+  LOCATION_TYPE_TERMINAL = 2;
+  LOCATION_TYPE_IN_TRANSIT = 3;
+  LOCATION_TYPE_CUSTOMER = 4;
+  LOCATION_TYPE_YARD = 5;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  ORDER_TYPE_IMPORT = 1;
+  ORDER_TYPE_EXPORT = 2;
+  ORDER_TYPE_REPO = 3;
+  ORDER_TYPE_EMPTY_RETURN = 4;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_PENDING = 1;
+  ORDER_STATUS_READY = 2;
+  ORDER_STATUS_DISPATCHED = 3;
+  ORDER_STATUS_IN_PROGRESS = 4;
+  ORDER_STATUS_DELIVERED = 5;
+  ORDER_STATUS_COMPLETED = 6;
+  ORDER_STATUS_HOLD = 7;
+  ORDER_STATUS_CANCELLED = 8;
+  ORDER_STATUS_FAILED = 9;
+}
+
+// Messages
+message Shipment {
+  string id = 1;
+  ShipmentType type = 2;
+  string reference_number = 3;
+  string customer_id = 4;
+  string customer_name = 5;
+  string steamship_line_id = 6;
+  string steamship_line_name = 7;
+  string port_id = 8;
+  string terminal_id = 9;
+  string terminal_name = 10;
+  Vessel vessel = 11;
+  google.protobuf.Timestamp last_free_day = 12;
+  google.protobuf.Timestamp port_cutoff = 13;
+  google.protobuf.Timestamp doc_cutoff = 14;
+  google.protobuf.Timestamp earliest_return_date = 15;
+  Location consignee = 16;
+  Location shipper = 17;
+  Location empty_return_location = 18;
+  Location empty_pickup_location = 19;
+  ShipmentStatus status = 20;
+  string special_instructions = 21;
+  repeated Container containers = 22;
+  int32 total_containers = 23;
+  int32 completed_containers = 24;
+  google.protobuf.Timestamp created_at = 25;
+  google.protobuf.Timestamp updated_at = 26;
+}
+
+message Vessel {
+  string name = 1;
+  string voyage = 2;
+  google.protobuf.Timestamp eta = 3;
+  google.protobuf.Timestamp ata = 4;
+}
+
+message Location {
+  string id = 1;
+  string name = 2;
+  string address = 3;
+  string city = 4;
+  string state = 5;
+  string zip = 6;
+  double latitude = 7;
+  double longitude = 8;
+  string contact_name = 9;
+  string contact_phone = 10;
+  string notes = 11;
+}
+
+message Container {
+  string id = 1;
+  string shipment_id = 2;
+  string container_number = 3;
+  ContainerSize size = 4;
+  ContainerType type = 5;
+  string seal_number = 6;
+  int32 weight_lbs = 7;
+  bool is_hazmat = 8;
+  string hazmat_class = 9;
+  string un_number = 10;
+  bool is_overweight = 11;
+  bool is_reefer = 12;
+  double reefer_temp_setpoint = 13;
+  string commodity = 14;
+  CustomsStatus customs_status = 15;
+  string customs_hold_type = 16;
+  google.protobuf.Timestamp terminal_available_date = 17;
+  ContainerState current_state = 18;
+  LocationType current_location_type = 19;
+  string current_location_id = 20;
+  google.protobuf.Timestamp created_at = 21;
+  google.protobuf.Timestamp updated_at = 22;
+}
+
+message Order {
+  string id = 1;
+  string order_number = 2;
+  string container_id = 3;
+  Container container = 4;
+  string shipment_id = 5;
+  OrderType type = 6;
+  string move_type = 7;
+  string customer_reference = 8;
+  Location pickup_location = 9;
+  Location delivery_location = 10;
+  Location return_location = 11;
+  google.protobuf.Timestamp requested_pickup_date = 12;
+  google.protobuf.Timestamp requested_delivery_date = 13;
+  OrderStatus status = 14;
+  string billing_status = 15;
+  string linked_order_id = 16;
+  string special_instructions = 17;
+  google.protobuf.Timestamp created_at = 18;
+  google.protobuf.Timestamp updated_at = 19;
+}
+
+// Requests & Responses
+message CreateShipmentRequest {
+  ShipmentType type = 1;
+  string reference_number = 2;
+  string customer_id = 3;
+  string steamship_line_id = 4;
+  string port_id = 5;
+  string terminal_id = 6;
+  string vessel_name = 7;
+  string voyage_number = 8;
+  google.protobuf.Timestamp vessel_eta = 9;
+  google.protobuf.Timestamp last_free_day = 10;
+  google.protobuf.Timestamp port_cutoff = 11;
+  google.protobuf.Timestamp doc_cutoff = 12;
+  google.protobuf.Timestamp earliest_return_date = 13;
+  string consignee_id = 14;
+  string shipper_id = 15;
+  string empty_return_location_id = 16;
+  string empty_pickup_location_id = 17;
+  string special_instructions = 18;
+  repeated ContainerInput containers = 19;
+}
+
+message ContainerInput {
+  string container_number = 1;
+  ContainerSize size = 2;
+  ContainerType type = 3;
+  string seal_number = 4;
+  int32 weight_lbs = 5;
+  bool is_hazmat = 6;
+  string hazmat_class = 7;
+  string un_number = 8;
+  double reefer_temp_setpoint = 9;
+  string commodity = 10;
+}
+
+message GetShipmentRequest {
+  string id = 1;
+}
+
+message ListShipmentsRequest {
+  ShipmentType type = 1;
+  ShipmentStatus status = 2;
+  string customer_id = 3;
+  google.protobuf.Timestamp lfd_before = 4;
+  google.protobuf.Timestamp lfd_after = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+  string sort_by = 8;
+  string sort_order = 9;
+}
+
+message ListShipmentsResponse {
+  repeated Shipment shipments = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateShipmentRequest {
+  string id = 1;
+  optional google.protobuf.Timestamp last_free_day = 2;
+  optional google.protobuf.Timestamp port_cutoff = 3;
+  optional string consignee_id = 4;
+  optional string empty_return_location_id = 5;
+  optional string special_instructions = 6;
+  optional ShipmentStatus status = 7;
+}
+
+message AddContainersRequest {
+  string shipment_id = 1;
+  repeated ContainerInput containers = 2;
+}
+
+message AddContainersResponse {
+  repeated Container containers = 1;
+  int32 added_count = 2;
+}
+
+message GetContainerRequest {
+  string id = 1;
+  string container_number = 2;  // Alternative lookup
+}
+
+message UpdateContainerStatusRequest {
+  string id = 1;
+  optional CustomsStatus customs_status = 2;
+  optional string customs_hold_type = 3;
+  optional ContainerState state = 4;
+  optional LocationType location_type = 5;
+  optional string location_id = 6;
+  optional google.protobuf.Timestamp available_date = 7;
+}
+
+message CheckAvailabilityRequest {
+  repeated string container_ids = 1;
+}
+
+message CheckAvailabilityResponse {
+  repeated ContainerAvailability availability = 1;
+}
+
+message ContainerAvailability {
+  string container_id = 1;
+  string container_number = 2;
+  bool is_available = 3;
+  string status = 4;
+  string reason = 5;
+  google.protobuf.Timestamp available_date = 6;
+}
+
+message CreateOrderRequest {
+  string container_id = 1;
+  OrderType type = 2;
+  string move_type = 3;
+  string customer_reference = 4;
+  string pickup_location_id = 5;
+  string delivery_location_id = 6;
+  string return_location_id = 7;
+  google.protobuf.Timestamp requested_pickup_date = 8;
+  google.protobuf.Timestamp requested_delivery_date = 9;
+  string special_instructions = 10;
+}
+
+message GetOrderRequest {
+  string id = 1;
+  string order_number = 2;  // Alternative lookup
+}
+
+message ListOrdersRequest {
+  string shipment_id = 1;
+  string customer_id = 2;
+  OrderStatus status = 3;
+  OrderType type = 4;
+  google.protobuf.Timestamp date_from = 5;
+  google.protobuf.Timestamp date_to = 6;
+  int32 page = 7;
+  int32 page_size = 8;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message UpdateOrderStatusRequest {
+  string id = 1;
+  OrderStatus status = 2;
+  string reason = 3;
+}
+
+message GenerateOrdersRequest {
+  string shipment_id = 1;
+}
+
+message GenerateOrdersResponse {
+  repeated Order orders = 1;
+  int32 generated_count = 2;
+}

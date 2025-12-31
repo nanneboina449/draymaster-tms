@@ -1,0 +1,937 @@
+"""
+DrayMaster TMS GraphQL Schema
+"""
+
+scalar DateTime
+scalar UUID
+
+"""
+Root Query type
+"""
+type Query {
+  # Shipments
+  shipment(id: UUID!): Shipment
+  shipments(filter: ShipmentFilter, pagination: PaginationInput): ShipmentConnection!
+  
+  # Containers
+  container(id: UUID, containerNumber: String): Container
+  containerAvailability(containerIds: [UUID!]!): [ContainerAvailability!]!
+  
+  # Orders
+  order(id: UUID, orderNumber: String): Order
+  orders(filter: OrderFilter, pagination: PaginationInput): OrderConnection!
+  
+  # Trips
+  trip(id: UUID, tripNumber: String): Trip
+  trips(filter: TripFilter, pagination: PaginationInput): TripConnection!
+  
+  # Dispatch
+  dispatchBoard(date: DateTime): DispatchBoard!
+  driverAvailability(input: DriverAvailabilityInput!): [DriverAvailability!]!
+  streetTurnOpportunities(filter: StreetTurnFilter): [StreetTurnOpportunity!]!
+  
+  # Tracking
+  currentLocation(driverId: UUID!): CurrentLocation
+  fleetLocations(driverIds: [UUID!]): [CurrentLocation!]!
+  tripETA(tripId: UUID!): TripETA
+  tripMilestones(tripId: UUID!): [Milestone!]!
+  containerLocation(containerId: UUID, containerNumber: String): ContainerLocation
+  
+  # Reference Data
+  steamshipLines: [SteamshipLine!]!
+  terminals(portId: UUID): [Location!]!
+  ports: [Port!]!
+  customers(type: String): [Customer!]!
+  
+  # Drivers
+  driver(id: UUID!): Driver
+  drivers(filter: DriverFilter): [Driver!]!
+}
+
+"""
+Root Mutation type
+"""
+type Mutation {
+  # Shipments
+  createShipment(input: CreateShipmentInput!): Shipment!
+  updateShipment(id: UUID!, input: UpdateShipmentInput!): Shipment!
+  addContainers(shipmentId: UUID!, containers: [ContainerInput!]!): [Container!]!
+  
+  # Orders
+  createOrder(input: CreateOrderInput!): Order!
+  updateOrderStatus(id: UUID!, status: OrderStatus!, reason: String): Order!
+  generateOrdersFromShipment(shipmentId: UUID!): [Order!]!
+  
+  # Trips
+  createTrip(input: CreateTripInput!): Trip!
+  updateTrip(id: UUID!, input: UpdateTripInput!): Trip!
+  assignDriver(tripId: UUID!, driverId: UUID!, tractorId: UUID): Trip!
+  unassignDriver(tripId: UUID!, reason: String): Trip!
+  dispatchTrip(tripId: UUID!): Trip!
+  cancelTrip(tripId: UUID!, reason: String!): Trip!
+  
+  # Trip Stops
+  recordStopArrival(tripId: UUID!, stopId: UUID!, input: StopArrivalInput!): TripStop!
+  completeStop(tripId: UUID!, stopId: UUID!, input: CompleteStopInput!): TripStop!
+  
+  # Street Turns
+  createStreetTurn(input: CreateStreetTurnInput!): Trip!
+  
+  # Tracking
+  recordLocation(input: RecordLocationInput!): LocationRecord!
+  recordMilestone(input: RecordMilestoneInput!): Milestone!
+  createGeofence(input: CreateGeofenceInput!): Geofence!
+}
+
+"""
+Root Subscription type
+"""
+type Subscription {
+  tripStatusChanged(tripIds: [UUID!]): TripStatusEvent!
+  locationUpdated(driverIds: [UUID!]): LocationUpdate!
+  geofenceEvent(locationIds: [UUID!]): GeofenceEvent!
+  containerAvailable(shipmentId: UUID): ContainerAvailableEvent!
+  lfdApproaching(daysThreshold: Int): LFDAlertEvent!
+}
+
+# ============== Types ==============
+
+type Shipment {
+  id: UUID!
+  type: ShipmentType!
+  referenceNumber: String!
+  customer: Customer!
+  steamshipLine: SteamshipLine!
+  terminal: Location!
+  vessel: Vessel
+  lastFreeDay: DateTime
+  portCutoff: DateTime
+  docCutoff: DateTime
+  earliestReturnDate: DateTime
+  consignee: Location
+  shipper: Location
+  emptyReturnLocation: Location
+  emptyPickupLocation: Location
+  status: ShipmentStatus!
+  specialInstructions: String
+  containers: [Container!]!
+  totalContainers: Int!
+  completedContainers: Int!
+  daysUntilLFD: Int
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Container {
+  id: UUID!
+  shipment: Shipment!
+  containerNumber: String!
+  size: ContainerSize!
+  type: ContainerType!
+  sealNumber: String
+  weightLbs: Int
+  isHazmat: Boolean!
+  hazmatClass: String
+  unNumber: String
+  isOverweight: Boolean!
+  isReefer: Boolean!
+  reeferTempSetpoint: Float
+  commodity: String
+  customsStatus: CustomsStatus!
+  customsHoldType: String
+  terminalAvailableDate: DateTime
+  currentState: ContainerState!
+  currentLocationType: LocationType!
+  currentLocation: Location
+  isAvailable: Boolean!
+  orders: [Order!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Order {
+  id: UUID!
+  orderNumber: String!
+  container: Container!
+  shipment: Shipment!
+  type: OrderType!
+  moveType: String
+  customerReference: String
+  pickupLocation: Location
+  deliveryLocation: Location
+  returnLocation: Location
+  requestedPickupDate: DateTime
+  requestedDeliveryDate: DateTime
+  status: OrderStatus!
+  billingStatus: BillingStatus!
+  linkedOrder: Order
+  specialInstructions: String
+  trips: [Trip!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Trip {
+  id: UUID!
+  tripNumber: String!
+  type: TripType!
+  status: TripStatus!
+  driver: Driver
+  tractor: Tractor
+  chassisId: UUID
+  stops: [TripStop!]!
+  currentStopSequence: Int!
+  orders: [Order!]!
+  plannedStartTime: DateTime
+  actualStartTime: DateTime
+  plannedEndTime: DateTime
+  actualEndTime: DateTime
+  estimatedDurationMins: Int!
+  totalMiles: Float!
+  completedMiles: Float!
+  isStreetTurn: Boolean!
+  isDualTransaction: Boolean!
+  linkedTrip: Trip
+  currentETA: TripETA
+  createdBy: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type TripStop {
+  id: UUID!
+  trip: Trip!
+  sequence: Int!
+  type: StopType!
+  activity: ActivityType!
+  status: StopStatus!
+  location: Location!
+  container: Container
+  containerNumber: String
+  order: Order
+  appointmentTime: DateTime
+  appointmentNumber: String
+  appointmentWindowMins: Int
+  plannedArrival: DateTime
+  actualArrival: DateTime
+  actualDeparture: DateTime
+  estimatedDurationMins: Int!
+  actualDurationMins: Int
+  freeTimeMins: Int!
+  detentionStartTime: DateTime
+  detentionMins: Int
+  gateTicketNumber: String
+  sealNumber: String
+  documents: [Document!]!
+  failureReason: String
+  notes: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Location {
+  id: UUID!
+  name: String!
+  type: String!
+  address: String
+  city: String
+  state: String
+  zip: String
+  latitude: Float
+  longitude: Float
+  contactName: String
+  contactPhone: String
+  notes: String
+  geofence: Geofence
+}
+
+type Customer {
+  id: UUID!
+  name: String!
+  code: String!
+  type: String!
+  address: String
+  city: String
+  state: String
+  zip: String
+  phone: String
+  email: String
+}
+
+type SteamshipLine {
+  id: UUID!
+  name: String!
+  code: String!
+}
+
+type Port {
+  id: UUID!
+  name: String!
+  code: String!
+  city: String
+  state: String
+}
+
+type Vessel {
+  name: String!
+  voyage: String
+  eta: DateTime
+  ata: DateTime
+}
+
+type Driver {
+  id: UUID!
+  name: String!
+  phone: String
+  email: String
+  status: DriverStatus!
+  licenseNumber: String
+  licenseState: String
+  licenseExpiration: DateTime
+  hasTWIC: Boolean!
+  twicExpiration: DateTime
+  hasHazmatEndorsement: Boolean!
+  currentLocation: CurrentLocation
+  availableDriveMins: Int
+  availableDutyMins: Int
+  currentTrip: Trip
+  tractors: [Tractor!]!
+}
+
+type Tractor {
+  id: UUID!
+  unitNumber: String!
+  vin: String
+  make: String
+  model: String
+  year: Int
+  status: EquipmentStatus!
+  currentDriver: Driver
+}
+
+type Document {
+  id: UUID!
+  type: String!
+  fileName: String!
+  filePath: String!
+  fileSize: Int
+  mimeType: String
+  uploadedAt: DateTime!
+}
+
+# Tracking Types
+type CurrentLocation {
+  driverId: UUID!
+  driverName: String!
+  tractorId: UUID
+  tractorUnit: String
+  tripId: UUID
+  tripNumber: String
+  latitude: Float!
+  longitude: Float!
+  speedMPH: Float
+  heading: Float
+  status: String!
+  currentStopName: String
+  currentStopSequence: Int
+  lastUpdate: DateTime!
+}
+
+type LocationRecord {
+  id: UUID!
+  driverId: UUID!
+  tractorId: UUID
+  tripId: UUID
+  latitude: Float!
+  longitude: Float!
+  speedMPH: Float
+  heading: Float
+  accuracyMeters: Float
+  source: String!
+  recordedAt: DateTime!
+  receivedAt: DateTime!
+}
+
+type TripETA {
+  tripId: UUID!
+  stops: [StopETA!]!
+  calculatedAt: DateTime!
+  trafficConditions: String
+}
+
+type StopETA {
+  stopId: UUID!
+  sequence: Int!
+  locationName: String!
+  scheduledTime: DateTime
+  estimatedArrival: DateTime!
+  varianceMins: Int!
+  remainingMiles: Float!
+  remainingMins: Int!
+  status: String!
+}
+
+type Milestone {
+  id: UUID!
+  tripId: UUID!
+  stopId: UUID
+  type: MilestoneType!
+  occurredAt: DateTime!
+  latitude: Float
+  longitude: Float
+  locationId: UUID
+  locationName: String
+  containerId: UUID
+  containerNumber: String
+  metadata: JSON
+  source: String!
+  recordedBy: String
+  createdAt: DateTime!
+}
+
+type Geofence {
+  id: UUID!
+  locationId: UUID!
+  name: String!
+  type: GeofenceType!
+  centerLatitude: Float
+  centerLongitude: Float
+  radiusMeters: Float
+  isActive: Boolean!
+}
+
+type ContainerLocation {
+  containerId: UUID!
+  containerNumber: String!
+  locationType: String!
+  locationId: UUID
+  locationName: String!
+  latitude: Float
+  longitude: Float
+  status: String
+  lastUpdate: DateTime!
+  currentTripId: UUID
+  driverName: String
+}
+
+# Dispatch Types
+type DispatchBoard {
+  unassigned: [Trip!]!
+  assigned: [Trip!]!
+  dispatched: [Trip!]!
+  inProgress: [Trip!]!
+  completed: [Trip!]!
+  failed: [Trip!]!
+  totalTrips: Int!
+  asOf: DateTime!
+}
+
+type DriverAvailability {
+  driverId: UUID!
+  driverName: String!
+  status: String!
+  latitude: Float
+  longitude: Float
+  availableDriveMins: Int!
+  availableDutyMins: Int!
+  currentTripId: UUID
+  currentTripETA: DateTime
+  distanceToPickupMiles: Float!
+  etaToPickupMins: Int!
+  endorsements: [String!]!
+  hasTWIC: Boolean!
+}
+
+type StreetTurnOpportunity {
+  importOrderId: UUID!
+  importOrderNumber: String!
+  importContainerNumber: String!
+  importConsigneeName: String!
+  importDeliveryLocation: Location!
+  importDeliveryDate: DateTime!
+  exportOrderId: UUID!
+  exportOrderNumber: String!
+  exportShipperName: String!
+  exportPickupLocation: Location!
+  exportPickupDate: DateTime!
+  steamshipLine: String!
+  containerSize: String!
+  containerType: String!
+  distanceMiles: Float!
+  estimatedSavings: Float!
+  matchScore: Int!
+}
+
+type ContainerAvailability {
+  containerId: UUID!
+  containerNumber: String!
+  isAvailable: Boolean!
+  status: String
+  reason: String
+  availableDate: DateTime
+}
+
+# Subscription Event Types
+type TripStatusEvent {
+  tripId: UUID!
+  tripNumber: String!
+  previousStatus: TripStatus!
+  newStatus: TripStatus!
+  timestamp: DateTime!
+}
+
+type LocationUpdate {
+  driverId: UUID!
+  tripId: UUID
+  latitude: Float!
+  longitude: Float!
+  speedMPH: Float
+  heading: Float
+  timestamp: DateTime!
+}
+
+type GeofenceEvent {
+  geofenceId: UUID!
+  geofenceName: String!
+  locationId: UUID!
+  driverId: UUID!
+  tripId: UUID
+  eventType: String!
+  occurredAt: DateTime!
+  latitude: Float!
+  longitude: Float!
+}
+
+type ContainerAvailableEvent {
+  containerId: UUID!
+  containerNumber: String!
+  shipmentId: UUID!
+  terminalId: UUID!
+  terminalName: String!
+  availableAt: DateTime!
+}
+
+type LFDAlertEvent {
+  shipmentId: UUID!
+  referenceNumber: String!
+  lastFreeDay: DateTime!
+  daysRemaining: Int!
+  containersAtRisk: Int!
+}
+
+# Connection Types for Pagination
+type ShipmentConnection {
+  edges: [ShipmentEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type ShipmentEdge {
+  node: Shipment!
+  cursor: String!
+}
+
+type OrderConnection {
+  edges: [OrderEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type OrderEdge {
+  node: Order!
+  cursor: String!
+}
+
+type TripConnection {
+  edges: [TripEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type TripEdge {
+  node: Trip!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+# ============== Inputs ==============
+
+input CreateShipmentInput {
+  type: ShipmentType!
+  referenceNumber: String!
+  customerId: UUID!
+  steamshipLineId: UUID!
+  portId: UUID!
+  terminalId: UUID!
+  vesselName: String
+  voyageNumber: String
+  vesselETA: DateTime
+  lastFreeDay: DateTime
+  portCutoff: DateTime
+  docCutoff: DateTime
+  earliestReturnDate: DateTime
+  consigneeId: UUID
+  shipperId: UUID
+  emptyReturnLocationId: UUID
+  emptyPickupLocationId: UUID
+  specialInstructions: String
+  containers: [ContainerInput!]
+}
+
+input UpdateShipmentInput {
+  vesselETA: DateTime
+  lastFreeDay: DateTime
+  portCutoff: DateTime
+  docCutoff: DateTime
+  consigneeId: UUID
+  emptyReturnLocationId: UUID
+  specialInstructions: String
+  status: ShipmentStatus
+}
+
+input ContainerInput {
+  containerNumber: String!
+  size: ContainerSize!
+  type: ContainerType!
+  sealNumber: String
+  weightLbs: Int
+  isHazmat: Boolean
+  hazmatClass: String
+  unNumber: String
+  reeferTempSetpoint: Float
+  commodity: String
+}
+
+input CreateOrderInput {
+  containerId: UUID!
+  type: OrderType!
+  moveType: String
+  customerReference: String
+  pickupLocationId: UUID
+  deliveryLocationId: UUID
+  returnLocationId: UUID
+  requestedPickupDate: DateTime
+  requestedDeliveryDate: DateTime
+  specialInstructions: String
+}
+
+input CreateTripInput {
+  type: TripType!
+  stops: [TripStopInput!]!
+  orderIds: [UUID!]
+  plannedStartTime: DateTime
+  driverId: UUID
+  tractorId: UUID
+}
+
+input TripStopInput {
+  sequence: Int!
+  type: StopType!
+  activity: ActivityType!
+  locationId: UUID!
+  containerId: UUID
+  orderId: UUID
+  appointmentTime: DateTime
+  appointmentNumber: String
+  estimatedDurationMins: Int
+  freeTimeMins: Int
+}
+
+input UpdateTripInput {
+  stops: [TripStopInput!]
+  plannedStartTime: DateTime
+}
+
+input StopArrivalInput {
+  arrivalTime: DateTime!
+  latitude: Float!
+  longitude: Float!
+}
+
+input CompleteStopInput {
+  departureTime: DateTime!
+  gateTicketNumber: String
+  sealNumber: String
+  chassisId: UUID
+  containerNumber: String
+  documentIds: [UUID!]
+  notes: String
+}
+
+input CreateStreetTurnInput {
+  importOrderId: UUID!
+  exportOrderId: UUID!
+  driverId: UUID
+  plannedStartTime: DateTime
+}
+
+input RecordLocationInput {
+  driverId: UUID!
+  tractorId: UUID
+  tripId: UUID
+  latitude: Float!
+  longitude: Float!
+  speedMPH: Float
+  heading: Float
+  accuracyMeters: Float
+  source: String!
+  recordedAt: DateTime!
+}
+
+input RecordMilestoneInput {
+  tripId: UUID!
+  stopId: UUID
+  type: MilestoneType!
+  occurredAt: DateTime!
+  latitude: Float
+  longitude: Float
+  containerId: UUID
+  containerNumber: String
+  source: String
+}
+
+input CreateGeofenceInput {
+  locationId: UUID!
+  name: String!
+  type: GeofenceType!
+  centerLatitude: Float!
+  centerLongitude: Float!
+  radiusMeters: Float!
+}
+
+input DriverAvailabilityInput {
+  pickupLatitude: Float!
+  pickupLongitude: Float!
+  pickupTime: DateTime
+  requiredDriveMins: Int
+  requiredEndorsements: [String!]
+  requireTWIC: Boolean
+}
+
+# Filter Inputs
+input ShipmentFilter {
+  type: ShipmentType
+  status: ShipmentStatus
+  customerId: UUID
+  terminalId: UUID
+  lfdBefore: DateTime
+  lfdAfter: DateTime
+  search: String
+}
+
+input OrderFilter {
+  shipmentId: UUID
+  customerId: UUID
+  status: OrderStatus
+  type: OrderType
+  dateFrom: DateTime
+  dateTo: DateTime
+}
+
+input TripFilter {
+  status: TripStatus
+  type: TripType
+  driverId: UUID
+  customerId: UUID
+  dateFrom: DateTime
+  dateTo: DateTime
+}
+
+input DriverFilter {
+  status: DriverStatus
+  hasTWIC: Boolean
+  hasHazmatEndorsement: Boolean
+  availableDriveMins: Int
+}
+
+input StreetTurnFilter {
+  importOrderId: UUID
+  exportOrderId: UUID
+  steamshipLineId: UUID
+  containerSize: String
+  maxDistanceMiles: Int
+  maxResults: Int
+}
+
+input PaginationInput {
+  first: Int
+  after: String
+  last: Int
+  before: String
+}
+
+# ============== Enums ==============
+
+enum ShipmentType {
+  IMPORT
+  EXPORT
+}
+
+enum ShipmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ContainerSize {
+  SIZE_20
+  SIZE_40
+  SIZE_45
+}
+
+enum ContainerType {
+  DRY
+  HIGH_CUBE
+  REEFER
+  TANK
+  FLAT_RACK
+  OPEN_TOP
+}
+
+enum ContainerState {
+  LOADED
+  EMPTY
+}
+
+enum CustomsStatus {
+  PENDING
+  HOLD
+  RELEASED
+}
+
+enum LocationType {
+  VESSEL
+  TERMINAL
+  IN_TRANSIT
+  CUSTOMER
+  YARD
+}
+
+enum OrderType {
+  IMPORT
+  EXPORT
+  REPO
+  EMPTY_RETURN
+}
+
+enum OrderStatus {
+  PENDING
+  READY
+  DISPATCHED
+  IN_PROGRESS
+  DELIVERED
+  COMPLETED
+  HOLD
+  CANCELLED
+  FAILED
+}
+
+enum BillingStatus {
+  UNBILLED
+  BILLED
+  PAID
+}
+
+enum TripType {
+  LIVE_LOAD
+  LIVE_UNLOAD
+  DROP_HOOK_SAME
+  DROP_HOOK_DIFF
+  DROP_ONLY
+  STREET_TURN
+  DUAL_TRANSACTION
+  BOBTAIL
+  EMPTY_PICKUP
+  EMPTY_RETURN
+  PRE_PULL
+  TRANSLOAD
+}
+
+enum TripStatus {
+  DRAFT
+  PLANNED
+  ASSIGNED
+  DISPATCHED
+  EN_ROUTE
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum StopType {
+  PICKUP
+  DELIVERY
+  RETURN
+  YARD
+}
+
+enum ActivityType {
+  PICKUP_LOADED
+  PICKUP_EMPTY
+  DELIVER_LOADED
+  DROP_LOADED
+  DROP_EMPTY
+  HOOK_EMPTY
+  LIVE_LOAD
+  LIVE_UNLOAD
+  CHASSIS_PICKUP
+  CHASSIS_DROP
+  FUEL_STOP
+  SCALE
+  CUSTOMS_EXAM
+}
+
+enum StopStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum MilestoneType {
+  TRIP_STARTED
+  DEPARTED_ORIGIN
+  ARRIVED_STOP
+  DEPARTED_STOP
+  GATE_IN
+  GATE_OUT
+  LOADED
+  UNLOADED
+  DELIVERED
+  TRIP_COMPLETED
+  EXCEPTION
+}
+
+enum GeofenceType {
+  CIRCLE
+  POLYGON
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_DUTY
+  DRIVING
+  SLEEPER
+  OFF_DUTY
+  INACTIVE
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+scalar JSON
