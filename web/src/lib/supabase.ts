@@ -168,6 +168,7 @@ export interface Trip {
   driver?: Driver;
   tractor?: Tractor;
   chassis?: Chassis;
+chassis_number: string;
   order?: Order;
 }
 
