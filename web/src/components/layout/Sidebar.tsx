@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -40,7 +40,7 @@ export default function Sidebar() {
     <div className="w-64 bg-gray-900 min-h-screen flex flex-col">
       <div className="p-4 border-b border-gray-800">
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
-          <span className="text-2xl">🚛</span>
+          <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
           DrayMaster TMS
         </h1>
         <p className="text-gray-400 text-sm mt-1">Intermodal Drayage</p>
@@ -69,7 +69,7 @@ export default function Sidebar() {
       <div className="p-4 border-t border-gray-800">
         <div className="bg-gray-800 rounded-lg p-3">
           <p className="text-gray-400 text-xs">Version 1.0.0</p>
-          <p className="text-gray-500 text-xs mt-1">© 2025 DrayMaster</p>
+          <p className="text-gray-500 text-xs mt-1">2025 DrayMaster</p>
         </div>
       </div>
     </div>
