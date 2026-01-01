@@ -321,6 +321,11 @@ export async function deleteDriver(id: string) {
   return true;
 }
 
+export async function updateDriverStatus(id: string, status: string) {
+  return updateDriver(id, { status });
+}
+
+
 // ============ TRACTORS ============
 
 export async function getTractors() {
