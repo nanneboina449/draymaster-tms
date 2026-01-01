@@ -199,12 +199,29 @@ export interface InvoiceItem {
   amount: number;
 }
 
+export interface TripLeg {
+  id: string;
+  trip_id: string;
+  leg_number: number;
+  leg_type: string;
+  status: string;
+  driver_id: string;
+  tractor_id: string;
+  chassis_id: string;
+  pickup_location: string;
+  delivery_location: string;
+  notes: string;
+  driver?: Driver;
+  tractor?: Tractor;
+  chassis?: Chassis;
+}
+
 // ============ SHIPMENTS ============
 
 export async function getShipments() {
   const { data, error } = await supabase
     .from('shipments')
-    .select(`*, containers (*)`)
+    .select('*, containers (*)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -213,7 +230,7 @@ export async function getShipments() {
 export async function getShipment(id: string) {
   const { data, error } = await supabase
     .from('shipments')
-    .select(`*, containers (*)`)
+    .select('*, containers (*)')
     .eq('id', id)
     .single();
   if (error) throw error;
@@ -222,26 +239,17 @@ export async function getShipment(id: string) {
 
 export async function createShipment(shipment: any, containers: any[]) {
   const refNumber = `SHP-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-  
   const { data: shipmentData, error: shipmentError } = await supabase
     .from('shipments')
     .insert({ ...shipment, reference_number: refNumber })
     .select()
     .single();
-
   if (shipmentError) throw shipmentError;
-
   if (containers.length > 0) {
-    const containersWithShipmentId = containers.map(c => ({
-      ...c,
-      shipment_id: shipmentData.id,
-    }));
-    const { error: containerError } = await supabase
-      .from('containers')
-      .insert(containersWithShipmentId);
+    const containersWithShipmentId = containers.map(c => ({ ...c, shipment_id: shipmentData.id }));
+    const { error: containerError } = await supabase.from('containers').insert(containersWithShipmentId);
     if (containerError) throw containerError;
   }
-
   return shipmentData;
 }
 
@@ -266,19 +274,30 @@ export async function updateShipmentStatus(id: string, status: string) {
   return updateShipment(id, { status } as Partial<Shipment>);
 }
 
-// ============ DRIVERS ============
+// ============ CONTAINERS ============
 
-export async function getDrivers() {
-  const { data, error } = await supabase
-    .from('drivers')
-    .select('*')
-    .order('last_name', { ascending: true });
+export async function addContainer(container: Partial<Container>) {
+  const { data, error } = await supabase.from('containers').insert(container).select().single();
   if (error) throw error;
   return data;
 }
 
-export async function getDriver(id: string) {
-  const { data, error } = await supabase.from('drivers').select('*').eq('id', id).single();
+export async function updateContainer(id: string, container: Partial<Container>) {
+  const { data, error } = await supabase.from('containers').update(container).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteContainer(id: string) {
+  const { error } = await supabase.from('containers').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+// ============ DRIVERS ============
+
+export async function getDrivers() {
+  const { data, error } = await supabase.from('drivers').select('*').order('last_name', { ascending: true });
   if (error) throw error;
   return data;
 }
@@ -290,12 +309,7 @@ export async function createDriver(driver: Partial<Driver>) {
 }
 
 export async function updateDriver(id: string, driver: Partial<Driver>) {
-  const { data, error } = await supabase
-    .from('drivers')
-    .update({ ...driver, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('drivers').update(driver).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
@@ -306,17 +320,10 @@ export async function deleteDriver(id: string) {
   return true;
 }
 
-export async function updateDriverStatus(id: string, status: string) {
-  return updateDriver(id, { status });
-}
-
 // ============ TRACTORS ============
 
 export async function getTractors() {
-  const { data, error } = await supabase
-    .from('tractors')
-    .select('*')
-    .order('unit_number', { ascending: true });
+  const { data, error } = await supabase.from('tractors').select('*').order('unit_number', { ascending: true });
   if (error) throw error;
   return data;
 }
@@ -342,10 +349,7 @@ export async function deleteTractor(id: string) {
 // ============ CHASSIS ============
 
 export async function getAllChassis() {
-  const { data, error } = await supabase
-    .from('chassis')
-    .select('*')
-    .order('chassis_number', { ascending: true });
+  const { data, error } = await supabase.from('chassis').select('*').order('chassis_number', { ascending: true });
   if (error) throw error;
   return data;
 }
@@ -371,32 +375,20 @@ export async function deleteChassis(id: string) {
 // ============ ORDERS ============
 
 export async function getOrders() {
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
   if (error) throw error;
   return data;
 }
 
 export async function createOrder(order: Partial<Order>) {
   const orderNumber = `ORD-${String(Date.now()).slice(-6)}`;
-  const { data, error } = await supabase
-    .from('orders')
-    .insert({ ...order, order_number: orderNumber })
-    .select()
-    .single();
+  const { data, error } = await supabase.from('orders').insert({ ...order, order_number: orderNumber }).select().single();
   if (error) throw error;
   return data;
 }
 
 export async function updateOrder(id: string, order: Partial<Order>) {
-  const { data, error } = await supabase
-    .from('orders')
-    .update({ ...order, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('orders').update(order).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
@@ -412,13 +404,7 @@ export async function deleteOrder(id: string) {
 export async function getTrips() {
   const { data, error } = await supabase
     .from('trips')
-    .select(`
-      *,
-      driver:drivers(*),
-      tractor:tractors(*),
-      chassis:chassis(*),
-      order:orders(*)
-    `)
+    .select('*, driver:drivers(*), tractor:tractors(*), chassis:chassis(*), order:orders(*)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -426,22 +412,13 @@ export async function getTrips() {
 
 export async function createTrip(trip: Partial<Trip>) {
   const tripNumber = `TRP-${String(Date.now()).slice(-6)}`;
-  const { data, error } = await supabase
-    .from('trips')
-    .insert({ ...trip, trip_number: tripNumber })
-    .select()
-    .single();
+  const { data, error } = await supabase.from('trips').insert({ ...trip, trip_number: tripNumber }).select().single();
   if (error) throw error;
   return data;
 }
 
 export async function updateTrip(id: string, trip: Partial<Trip>) {
-  const { data, error } = await supabase
-    .from('trips')
-    .update({ ...trip, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('trips').update(trip).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
@@ -456,47 +433,44 @@ export async function deleteTrip(id: string) {
   return true;
 }
 
+export async function createMultiLegTrip(tripData: any, legs: Partial<TripLeg>[]) {
+  const tripNumber = `TRP-${String(Date.now()).slice(-6)}`;
+  const { data: trip, error: tripError } = await supabase
+    .from('trips')
+    .insert({ ...tripData, trip_number: tripNumber, is_multi_leg: legs.length > 1, total_legs: legs.length, current_leg: 1 })
+    .select()
+    .single();
+  if (tripError) throw tripError;
+  if (legs.length > 0) {
+    const legsWithTripId = legs.map((leg, index) => ({ ...leg, trip_id: trip.id, leg_number: index + 1 }));
+    const { error: legsError } = await supabase.from('trip_legs').insert(legsWithTripId);
+    if (legsError) throw legsError;
+  }
+  return trip;
+}
+
 // ============ INVOICES ============
 
 export async function getInvoices() {
-  const { data, error } = await supabase
-    .from('invoices')
-    .select(`*, items:invoice_items(*)`)
-    .order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('invoices').select('*, items:invoice_items(*)').order('created_at', { ascending: false });
   if (error) throw error;
   return data;
 }
 
 export async function createInvoice(invoice: Partial<Invoice>, items: Partial<InvoiceItem>[]) {
   const invoiceNumber = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-  
-  const { data: invoiceData, error: invoiceError } = await supabase
-    .from('invoices')
-    .insert({ ...invoice, invoice_number: invoiceNumber })
-    .select()
-    .single();
-
+  const { data: invoiceData, error: invoiceError } = await supabase.from('invoices').insert({ ...invoice, invoice_number: invoiceNumber }).select().single();
   if (invoiceError) throw invoiceError;
-
   if (items.length > 0) {
-    const itemsWithInvoiceId = items.map(item => ({
-      ...item,
-      invoice_id: invoiceData.id,
-    }));
+    const itemsWithInvoiceId = items.map(item => ({ ...item, invoice_id: invoiceData.id }));
     const { error: itemsError } = await supabase.from('invoice_items').insert(itemsWithInvoiceId);
     if (itemsError) throw itemsError;
   }
-
   return invoiceData;
 }
 
 export async function updateInvoice(id: string, invoice: Partial<Invoice>) {
-  const { data, error } = await supabase
-    .from('invoices')
-    .update({ ...invoice, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('invoices').update(invoice).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
@@ -516,270 +490,10 @@ export async function getDashboardStats() {
     supabase.from('drivers').select('status'),
     supabase.from('tractors').select('status'),
   ]);
-
   return {
     shipments: shipments.data || [],
     orders: orders.data || [],
     drivers: drivers.data || [],
     tractors: tractors.data || [],
   };
-  
-  // ============ ADDITIONAL TYPES ============
-
-export interface DispatchActivity {
-  id: string;
-  trip_id: string;
-  order_id: string;
-  activity_type: string;
-  activity_status: string;
-  driver_id: string;
-  location: string;
-  latitude: number;
-  longitude: number;
-  notes: string;
-  timestamp: string;
-  created_by: string;
-  driver?: Driver;
-}
-
-export interface TripLeg {
-  id: string;
-  trip_id: string;
-  leg_number: number;
-  leg_type: string;
-  status: string;
-  driver_id: string;
-  tractor_id: string;
-  chassis_id: string;
-  pickup_location: string;
-  pickup_address: string;
-  pickup_city: string;
-  pickup_state: string;
-  pickup_appointment: string;
-  pickup_arrival: string;
-  pickup_departure: string;
-  delivery_location: string;
-  delivery_address: string;
-  delivery_city: string;
-  delivery_state: string;
-  delivery_appointment: string;
-  delivery_arrival: string;
-  delivery_departure: string;
-  estimated_miles: number;
-  actual_miles: number;
-  estimated_duration: number;
-  actual_duration: number;
-  notes: string;
-  driver?: Driver;
-  tractor?: Tractor;
-  chassis?: Chassis;
-}
-
-export interface TripDriver {
-  id: string;
-  trip_id: string;
-  trip_leg_id: string;
-  driver_id: string;
-  role: string;
-  assigned_at: string;
-  started_at: string;
-  completed_at: string;
-  status: string;
-  pay_amount: number;
-  notes: string;
-  driver?: Driver;
-}
-
-// ============ CONTAINER OPERATIONS ============
-
-export async function addContainer(container: Partial<Container>) {
-  const { data, error } = await supabase
-    .from('containers')
-    .insert(container)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function updateContainer(id: string, container: Partial<Container>) {
-  const { data, error } = await supabase
-    .from('containers')
-    .update(container)
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteContainer(id: string) {
-  const { error } = await supabase.from('containers').delete().eq('id', id);
-  if (error) throw error;
-  return true;
-}
-
-export async function getContainersByShipment(shipmentId: string) {
-  const { data, error } = await supabase
-    .from('containers')
-    .select('*')
-    .eq('shipment_id', shipmentId);
-  if (error) throw error;
-  return data;
-}
-
-// ============ DISPATCH ACTIVITIES ============
-
-export async function getDispatchActivities(tripId: string) {
-  const { data, error } = await supabase
-    .from('dispatch_activities')
-    .select(`*, driver:drivers(*)`)
-    .eq('trip_id', tripId)
-    .order('timestamp', { ascending: false });
-  if (error) throw error;
-  return data;
-}
-
-export async function addDispatchActivity(activity: Partial<DispatchActivity>) {
-  const { data, error } = await supabase
-    .from('dispatch_activities')
-    .insert({ ...activity, timestamp: new Date().toISOString() })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-// ============ TRIP LEGS ============
-
-export async function getTripLegs(tripId: string) {
-  const { data, error } = await supabase
-    .from('trip_legs')
-    .select(`*, driver:drivers(*), tractor:tractors(*), chassis:chassis(*)`)
-    .eq('trip_id', tripId)
-    .order('leg_number', { ascending: true });
-  if (error) throw error;
-  return data;
-}
-
-export async function createTripLeg(leg: Partial<TripLeg>) {
-  const { data, error } = await supabase
-    .from('trip_legs')
-    .insert(leg)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function updateTripLeg(id: string, leg: Partial<TripLeg>) {
-  const { data, error } = await supabase
-    .from('trip_legs')
-    .update({ ...leg, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteTripLeg(id: string) {
-  const { error } = await supabase.from('trip_legs').delete().eq('id', id);
-  if (error) throw error;
-  return true;
-}
-
-// ============ TRIP DRIVERS ============
-
-export async function getTripDrivers(tripId: string) {
-  const { data, error } = await supabase
-    .from('trip_drivers')
-    .select(`*, driver:drivers(*)`)
-    .eq('trip_id', tripId)
-    .order('assigned_at', { ascending: true });
-  if (error) throw error;
-  return data;
-}
-
-export async function assignDriverToTrip(assignment: Partial<TripDriver>) {
-  const { data, error } = await supabase
-    .from('trip_drivers')
-    .insert(assignment)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function updateTripDriver(id: string, data: Partial<TripDriver>) {
-  const { data: result, error } = await supabase
-    .from('trip_drivers')
-    .update(data)
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return result;
-}
-
-export async function removeDriverFromTrip(id: string) {
-  const { error } = await supabase.from('trip_drivers').delete().eq('id', id);
-  if (error) throw error;
-  return true;
-}
-
-// ============ ENHANCED TRIP OPERATIONS ============
-
-export async function getTripsWithDetails() {
-  const { data, error } = await supabase
-    .from('trips')
-    .select(`
-      *,
-      driver:drivers(*),
-      tractor:tractors(*),
-      chassis:chassis(*),
-      order:orders(*),
-      legs:trip_legs(*),
-      assigned_drivers:trip_drivers(*, driver:drivers(*))
-    `)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data;
-}
-
-export async function createMultiLegTrip(tripData: any, legs: Partial<TripLeg>[]) {
-  const tripNumber = `TRP-${String(Date.now()).slice(-6)}`;
-  
-  // Create the trip
-  const { data: trip, error: tripError } = await supabase
-    .from('trips')
-    .insert({
-      ...tripData,
-      trip_number: tripNumber,
-      is_multi_leg: legs.length > 1,
-      total_legs: legs.length,
-      current_leg: 1,
-    })
-    .select()
-    .single();
-
-  if (tripError) throw tripError;
-
-  // Create legs
-  if (legs.length > 0) {
-    const legsWithTripId = legs.map((leg, index) => ({
-      ...leg,
-      trip_id: trip.id,
-      leg_number: index + 1,
-    }));
-    
-    const { error: legsError } = await supabase
-      .from('trip_legs')
-      .insert(legsWithTripId);
-    
-    if (legsError) throw legsError;
-  }
-
-  return trip;
-}
 }
