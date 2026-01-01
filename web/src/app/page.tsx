@@ -1,4 +1,3 @@
-// DrayMaster TMS - Updated 2026-01-01 14:21
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -63,7 +62,6 @@ export default function Dashboard() {
         <p className="text-gray-500 mt-1">Welcome to DrayMaster TMS</p>
       </div>
 
-      {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white">
           <p className="text-blue-100">Total Shipments</p>
@@ -87,7 +85,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Status Breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow p-6">
           <h3 className="font-semibold text-gray-800 mb-4">Shipment Status</h3>
@@ -145,30 +142,27 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Quick Actions */}
       <div className="bg-white rounded-xl shadow p-6">
         <h3 className="font-semibold text-gray-800 mb-4">Quick Actions</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <a href="/shipments" className="p-4 bg-blue-50 rounded-xl hover:bg-blue-100 transition text-center">
-            <span className="text-3xl">📦</span>
+            <span className="text-3xl">??</span>
             <p className="font-medium mt-2">New Shipment</p>
           </a>
           <a href="/dispatch" className="p-4 bg-purple-50 rounded-xl hover:bg-purple-100 transition text-center">
-            <span className="text-3xl">🚚</span>
+            <span className="text-3xl">??</span>
             <p className="font-medium mt-2">Dispatch Board</p>
           </a>
           <a href="/drivers" className="p-4 bg-green-50 rounded-xl hover:bg-green-100 transition text-center">
-            <span className="text-3xl">👤</span>
+            <span className="text-3xl">??</span>
             <p className="font-medium mt-2">Manage Drivers</p>
           </a>
           <a href="/billing" className="p-4 bg-orange-50 rounded-xl hover:bg-orange-100 transition text-center">
-            <span className="text-3xl">💰</span>
+            <span className="text-3xl">??</span>
             <p className="font-medium mt-2">Billing</p>
           </a>
         </div>
       </div>
     </div>
   );
-}/ /   A u t o - d e p l o y   t e s t 
- 
- 
+}

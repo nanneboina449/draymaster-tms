@@ -137,3 +137,6 @@ docs/_build/
 # Misc
 *.bak
 *.backup
+
+.vercel
+.env*.local
