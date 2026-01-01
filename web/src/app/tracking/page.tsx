@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { getTrips, updateTripStatus, Trip } from '../../lib/supabase';
+import { EditTripModal } from '../../components/dispatch/EditTripModal';
 
 export default function TrackingPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
 
   useEffect(() => { fetchTrips(); }, []);
 
@@ -166,6 +168,15 @@ export default function TrackingPage() {
                   <p className="font-semibold">{selectedTrip.delivery_location || '-'}</p>
                 </div>
               </div>
+			  {/* Add this after the pickup/delivery section and before status buttons */}
+<div className="mb-4">
+  <button
+    onClick={() => setEditingTrip(selectedTrip)}
+    className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center justify-center gap-2"
+  >
+    ✏️ Edit Trip
+  </button>
+</div>
               <div>
                 <h4 className="font-semibold mb-2">Update Status</h4>
                 <div className="flex flex-wrap gap-2">
@@ -186,6 +197,17 @@ export default function TrackingPage() {
           )}
         </div>
       </div>
+	  {/* Edit Trip Modal */}
+{editingTrip && (
+  <EditTripModal
+    trip={editingTrip}
+    onClose={() => setEditingTrip(null)}
+    onSave={() => {
+      setEditingTrip(null);
+      fetchTrips();
+    }}
+  />
+)}
     </div>
   );
 }

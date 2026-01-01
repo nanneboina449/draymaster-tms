@@ -148,19 +148,23 @@ export default function DispatchPage() {
       return;
     }
     try {
-      await createTrip({
-        type: selectedOrder.type === 'IMPORT' ? 'IMPORT_DELIVERY' : 'EXPORT_PICKUP',
-        status: 'DISPATCHED',
-        order_id: selectedOrder.id,
-        driver_id: simpleForm.driver_id,
-        tractor_id: simpleForm.tractor_id,
-        chassis_id: simpleForm.chassis_id || null,
-        container_number: selectedOrder.container_number,
-        pickup_location: selectedOrder.pickup_location,
-        delivery_location: selectedOrder.delivery_location,
-        planned_start: simpleForm.planned_start || null,
-        notes: simpleForm.notes,
-      });
+    // Get selected chassis number
+const selectedChassis = chassisList.find(c => c.id === simpleForm.chassis_id);
+
+await createTrip({
+  type: selectedOrder.type === 'IMPORT' ? 'IMPORT_DELIVERY' : 'EXPORT_PICKUP',
+  status: 'DISPATCHED',
+  order_id: selectedOrder.id,
+  driver_id: simpleForm.driver_id,
+  tractor_id: simpleForm.tractor_id,
+  chassis_id: simpleForm.chassis_id || null,
+  chassis_number: selectedChassis?.chassis_number || null,
+  container_number: selectedOrder.container_number,
+  pickup_location: selectedOrder.pickup_location,
+  delivery_location: selectedOrder.delivery_location,
+  planned_start: simpleForm.planned_start || null,
+  notes: simpleForm.notes,
+});
       
       await updateOrder(selectedOrder.id, { status: 'DISPATCHED' });
       await fetchData();
