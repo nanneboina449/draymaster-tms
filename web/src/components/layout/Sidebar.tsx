@@ -15,6 +15,8 @@ const navigation = [
   { name: 'Billing', href: '/billing', icon: 'dollar' },
   { name: 'Reports', href: '/reports', icon: 'chart' },
   { name: 'Street Turns', href: '/street-turns', icon: 'refresh' },
+{ name: 'Rates', href: '/rates', icon: 'dollar' },
+{ name: 'Settlements', href: '/settlements', icon: 'chart' },
   { name: 'Settings', href: '/settings', icon: 'cog' },
 ];
 
