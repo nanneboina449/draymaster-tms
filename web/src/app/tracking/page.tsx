@@ -1,228 +1,35 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
-
-interface ContainerStatus {
-  id: string;
-  container_number: string;
-  shipment_id: string;
-  terminal_code: string;
-  terminal_name: string;
-  emodal_status: string;
-  availability_status: string;
-  has_customs_hold: boolean;
-  has_freight_hold: boolean;
-  has_usda_hold: boolean;
-  has_tmf_hold: boolean;
-  vessel_name: string;
-  voyage_number: string;
-  last_free_day: string;
-  demurrage_amount: number;
-  yard_location: string;
-  appointment_date: string;
-  appointment_time: string;
-  gate_status: string;
-  last_checked_at: string;
-  shipments?: {
-    reference_number: string;
-    customer_name: string;
-    type: string;
-    delivery_city: string;
-  };
-}
-
-interface EmodalConfig {
-  id: string;
-  provider: string;
-  api_username: string;
-  api_password_encrypted: string;
-  api_key: string;
-  is_active: boolean;
-  auto_refresh_enabled: boolean;
-  refresh_interval_minutes: number;
-  last_sync_at: string;
-  sync_status: string;
-  containers_synced: number;
-  errors_count: number;
-}
-
-interface SyncLog {
-  id: string;
-  synced_at: string;
-  containers_updated: number;
-  containers_failed: number;
-  duration_ms: number;
-  status: string;
-  error_message: string;
-}
-
-const TERMINALS = [
-  { code: 'APM', name: 'APM Terminals', port: 'Los Angeles' },
-  { code: 'WBCT', name: 'West Basin Container Terminal', port: 'Los Angeles' },
-  { code: 'TRAPAC-LA', name: 'TraPac Los Angeles', port: 'Los Angeles' },
-  { code: 'YTI', name: 'Yusen Terminals', port: 'Los Angeles' },
-  { code: 'EVERPORT', name: 'Everport Terminal', port: 'Los Angeles' },
-  { code: 'LBCT', name: 'Long Beach Container Terminal', port: 'Long Beach' },
-  { code: 'PCT', name: 'Pacific Container Terminal', port: 'Long Beach' },
-  { code: 'ITS', name: 'International Transportation Service', port: 'Long Beach' },
-  { code: 'SSA-PL', name: 'SSA Pier A', port: 'Long Beach' },
-  { code: 'TRAPAC-LB', name: 'TraPac Long Beach', port: 'Long Beach' },
-  { code: 'TTI', name: 'Total Terminals International', port: 'Long Beach' },
-  { code: 'OICT', name: 'Oakland International Container Terminal', port: 'Oakland' },
-  { code: 'SSA-OAK', name: 'SSA Oakland', port: 'Oakland' },
-];
+import { getTrips, updateTripStatus, Trip } from '../../lib/supabase';
 
 export default function TrackingPage() {
-  const [activeTab, setActiveTab] = useState<'containers' | 'settings' | 'logs'>('containers');
-  const [containers, setContainers] = useState<ContainerStatus[]>([]);
-  const [config, setConfig] = useState<EmodalConfig | null>(null);
-  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
+  const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [savingConfig, setSavingConfig] = useState(false);
-
-  // Filters
-  const [filterTerminal, setFilterTerminal] = useState('');
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterHoldsOnly, setFilterHoldsOnly] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
 
-  // Config form
-  const [configForm, setConfigForm] = useState({
-    api_username: '',
-    api_password: '',
-    api_key: '',
-    auto_refresh_enabled: true,
-    refresh_interval_minutes: 30,
-  });
+  useEffect(() => { fetchTrips(); }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchTrips = async () => {
     try {
-      // Fetch containers with shipment info
-      const { data: containerData } = await supabase
-        .from('container_tracking')
-        .select(`
-          *,
-          shipments(reference_number, customer_name, type, delivery_city)
-        `)
-        .order('last_checked_at', { ascending: false });
-      
-      setContainers(containerData || []);
-
-      // Fetch eModal config
-      const { data: configData } = await supabase
-        .from('emodal_config')
-        .select('*')
-        .eq('is_active', true)
-        .single();
-      
-      if (configData) {
-        setConfig(configData);
-        setConfigForm({
-          api_username: configData.api_username || '',
-          api_password: '', // Don't show password
-          api_key: configData.api_key || '',
-          auto_refresh_enabled: configData.auto_refresh_enabled ?? true,
-          refresh_interval_minutes: configData.refresh_interval_minutes || 30,
-        });
-      }
-
-      // Fetch sync logs
-      const { data: logsData } = await supabase
-        .from('emodal_sync_log')
-        .select('*')
-        .order('synced_at', { ascending: false })
-        .limit(20);
-      
-      setSyncLogs(logsData || []);
-
-    } catch (err) {
-      console.error('Error fetching tracking data:', err);
+      setLoading(true);
+      const data = await getTrips();
+      setTrips(data || []);
+    } catch (err: any) {
+      alert('Error: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const saveConfig = async () => {
-    setSavingConfig(true);
+  const handleStatusUpdate = async (tripId: string, newStatus: string) => {
     try {
-      const updateData: any = {
-        api_username: configForm.api_username,
-        api_key: configForm.api_key,
-        auto_refresh_enabled: configForm.auto_refresh_enabled,
-        refresh_interval_minutes: configForm.refresh_interval_minutes,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Only update password if provided
-      if (configForm.api_password) {
-        updateData.api_password_encrypted = configForm.api_password; // In production, encrypt this
+      await updateTripStatus(tripId, newStatus);
+      await fetchTrips();
+      if (selectedTrip?.id === tripId) {
+        setSelectedTrip({ ...selectedTrip, status: newStatus });
       }
-
-      if (config?.id) {
-        await supabase
-          .from('emodal_config')
-          .update(updateData)
-          .eq('id', config.id);
-      } else {
-        await supabase
-          .from('emodal_config')
-          .insert({
-            ...updateData,
-            provider: 'EMODAL',
-            is_active: true,
-          });
-      }
-
-      alert('Configuration saved successfully!');
-      await fetchData();
-    } catch (err: any) {
-      alert('Error saving configuration: ' + err.message);
-    } finally {
-      setSavingConfig(false);
-    }
-  };
-
-  const triggerSync = async () => {
-    setSyncing(true);
-    try {
-      const response = await fetch('/api/emodal-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        alert(`Sync completed!\nContainers updated: ${result.containersUpdated || 0}\nTime: ${result.duration || 0}ms`);
-        await fetchData();
-      } else {
-        alert('Sync failed: ' + (result.error || 'Unknown error'));
-      }
-    } catch (err: any) {
-      alert('Sync error: ' + err.message);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const addContainerToTracking = async (containerNumber: string, terminalCode: string) => {
-    try {
-      await supabase.from('container_tracking').insert({
-        container_number: containerNumber.toUpperCase(),
-        terminal_code: terminalCode,
-        terminal_name: TERMINALS.find(t => t.code === terminalCode)?.name || terminalCode,
-        availability_status: 'UNKNOWN',
-        last_checked_at: new Date().toISOString(),
-      });
-      await fetchData();
-      alert('Container added to tracking!');
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
@@ -230,438 +37,287 @@ export default function TrackingPage() {
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      'AVAILABLE': 'bg-green-100 text-green-800',
-      'NOT_AVAILABLE': 'bg-yellow-100 text-yellow-800',
-      'ON_HOLD': 'bg-red-100 text-red-800',
-      'IN_YARD': 'bg-blue-100 text-blue-800',
-      'DISCHARGED': 'bg-cyan-100 text-cyan-800',
-      'GATED_OUT': 'bg-gray-100 text-gray-800',
-      'UNKNOWN': 'bg-gray-100 text-gray-600',
+      'PLANNED': 'bg-gray-100 text-gray-800',
+      'DISPATCHED': 'bg-blue-100 text-blue-800',
+      'EN_ROUTE': 'bg-purple-100 text-purple-800',
+      'AT_PICKUP': 'bg-yellow-100 text-yellow-800',
+      'LOADED': 'bg-indigo-100 text-indigo-800',
+      'AT_DELIVERY': 'bg-orange-100 text-orange-800',
+      'DELIVERED': 'bg-green-100 text-green-800',
+      'COMPLETED': 'bg-gray-100 text-gray-800',
     };
-    return colors[status] || 'bg-gray-100 text-gray-600';
+    return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const isLfdUrgent = (lfdDate: string) => {
-    if (!lfdDate) return false;
-    const lfd = new Date(lfdDate);
-    const diffDays = Math.ceil((lfd.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    return diffDays <= 2;
+  const getStatusIcon = (status: string) => {
+    const icons: Record<string, string> = {
+      'PLANNED': '📋',
+      'DISPATCHED': '📤',
+      'EN_ROUTE': '🚛',
+      'AT_PICKUP': '📍',
+      'LOADED': '📦',
+      'AT_DELIVERY': '🎯',
+      'DELIVERED': '✅',
+      'COMPLETED': '🏁',
+    };
+    return icons[status] || '📋';
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString();
-  };
+  const activeTrips = trips.filter(t => !['COMPLETED', 'CANCELLED'].includes(t.status));
+  const filteredTrips = filterStatus ? trips.filter(t => t.status === filterStatus) : trips;
 
-  const formatDateTime = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString();
-  };
-
-  // Apply filters
-  const filteredContainers = containers.filter(c => {
-    if (filterTerminal && c.terminal_code !== filterTerminal) return false;
-    if (filterStatus && c.availability_status !== filterStatus) return false;
-    if (filterHoldsOnly && !c.has_customs_hold && !c.has_freight_hold && !c.has_usda_hold && !c.has_tmf_hold) return false;
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      return (
-        c.container_number?.toLowerCase().includes(search) ||
-        c.shipments?.reference_number?.toLowerCase().includes(search) ||
-        c.shipments?.customer_name?.toLowerCase().includes(search)
-      );
-    }
-    return true;
-  });
-
-  // Stats
   const stats = {
-    total: containers.length,
-    available: containers.filter(c => c.availability_status === 'AVAILABLE').length,
-    onHold: containers.filter(c => c.has_customs_hold || c.has_freight_hold || c.has_usda_hold || c.has_tmf_hold).length,
-    lfdAlert: containers.filter(c => isLfdUrgent(c.last_free_day)).length,
+    total: trips.length,
+    active: activeTrips.length,
+    enRoute: trips.filter(t => t.status === 'EN_ROUTE').length,
+    atPickup: trips.filter(t => t.status === 'AT_PICKUP').length,
+    atDelivery: trips.filter(t => t.status === 'AT_DELIVERY').length,
+    completed: trips.filter(t => t.status === 'COMPLETED').length,
   };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Container Tracking</h1>
-          <p className="text-gray-500 mt-1">Real-time container status from eModal</p>
+          <h1 className="text-3xl font-bold text-gray-900">Live Tracking</h1>
+          <p className="text-gray-500 mt-1">Monitor all trips in real-time</p>
         </div>
-        <div className="flex items-center gap-4">
-          {config?.last_sync_at && (
-            <span className="text-sm text-gray-500">
-              Last sync: {formatDateTime(config.last_sync_at)}
-            </span>
-          )}
-          <button
-            onClick={triggerSync}
-            disabled={syncing}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
-          >
-            {syncing ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                Syncing...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Sync Now
-              </>
-            )}
-          </button>
-        </div>
+        <button onClick={fetchTrips} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          🔄 Refresh
+        </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">Total Trips</p>
+          <p className="text-2xl font-bold">{stats.total}</p>
+        </div>
         <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-          <p className="text-sm text-gray-500">Total Tracking</p>
-          <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
+          <p className="text-sm text-gray-500">Active</p>
+          <p className="text-2xl font-bold text-blue-600">{stats.active}</p>
         </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
-          <p className="text-sm text-gray-500">Available</p>
-          <p className="text-2xl font-bold text-green-600">{stats.available}</p>
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">🚛 En Route</p>
+          <p className="text-2xl font-bold text-purple-600">{stats.enRoute}</p>
         </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-red-500">
-          <p className="text-sm text-gray-500">On Hold</p>
-          <p className="text-2xl font-bold text-red-600">{stats.onHold}</p>
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">📍 At Pickup</p>
+          <p className="text-2xl font-bold text-yellow-600">{stats.atPickup}</p>
         </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-orange-500">
-          <p className="text-sm text-gray-500">LFD Alert</p>
-          <p className="text-2xl font-bold text-orange-600">{stats.lfdAlert}</p>
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">🎯 At Delivery</p>
+          <p className="text-2xl font-bold text-orange-600">{stats.atDelivery}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">✅ Completed</p>
+          <p className="text-2xl font-bold text-green-600">{stats.completed}</p>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-xl shadow">
-        <div className="border-b px-6">
-          <div className="flex gap-4">
-            {[
-              { id: 'containers', label: `Containers (${containers.length})` },
-              { id: 'settings', label: '⚙️ eModal Settings' },
-              { id: 'logs', label: '📋 Sync Logs' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`py-4 px-4 font-medium border-b-2 transition ${
-                  activeTab === tab.id
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Trip List */}
+        <div className="lg:col-span-1 bg-white rounded-xl shadow overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+            <h3 className="font-semibold">All Trips</h3>
+            <select 
+              value={filterStatus} 
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="text-sm border rounded-lg px-2 py-1"
+            >
+              <option value="">All Status</option>
+              <option value="DISPATCHED">Dispatched</option>
+              <option value="EN_ROUTE">En Route</option>
+              <option value="AT_PICKUP">At Pickup</option>
+              <option value="LOADED">Loaded</option>
+              <option value="AT_DELIVERY">At Delivery</option>
+              <option value="DELIVERED">Delivered</option>
+              <option value="COMPLETED">Completed</option>
+            </select>
           </div>
-        </div>
-
-        <div className="p-6">
-          {/* Containers Tab */}
-          {activeTab === 'containers' && (
-            <>
-              {/* Filters */}
-              <div className="flex gap-4 items-center mb-6 flex-wrap">
-                <input
-                  type="text"
-                  placeholder="Search container, reference..."
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  className="px-4 py-2 border rounded-lg w-64"
-                />
-                <select
-                  value={filterTerminal}
-                  onChange={e => setFilterTerminal(e.target.value)}
-                  className="px-4 py-2 border rounded-lg"
-                >
-                  <option value="">All Terminals</option>
-                  {TERMINALS.map(t => (
-                    <option key={t.code} value={t.code}>{t.name}</option>
-                  ))}
-                </select>
-                <select
-                  value={filterStatus}
-                  onChange={e => setFilterStatus(e.target.value)}
-                  className="px-4 py-2 border rounded-lg"
-                >
-                  <option value="">All Status</option>
-                  <option value="AVAILABLE">Available</option>
-                  <option value="NOT_AVAILABLE">Not Available</option>
-                  <option value="ON_HOLD">On Hold</option>
-                  <option value="IN_YARD">In Yard</option>
-                </select>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={filterHoldsOnly}
-                    onChange={e => setFilterHoldsOnly(e.target.checked)}
-                    className="rounded"
-                  />
-                  <span className="text-sm">Holds Only</span>
-                </label>
+          <div className="max-h-[600px] overflow-y-auto">
+            {loading ? (
+              <div className="p-8 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
               </div>
-
-              {/* Container Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Container</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Terminal</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Holds</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vessel</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">LFD</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Check</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {filteredContainers.map(container => (
-                      <tr key={container.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="font-mono font-bold">{container.container_number}</div>
-                          <div className="text-xs text-gray-500">{container.shipments?.reference_number}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{container.terminal_name}</div>
-                          <div className="text-xs text-gray-500">{container.yard_location}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(container.availability_status)}`}>
-                            {container.availability_status || 'UNKNOWN'}
-                          </span>
-                          {container.emodal_status && (
-                            <div className="text-xs text-gray-500 mt-1">{container.emodal_status}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {container.has_customs_hold && (
-                              <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs rounded">🛃 Customs</span>
-                            )}
-                            {container.has_freight_hold && (
-                              <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">📦 Freight</span>
-                            )}
-                            {container.has_usda_hold && (
-                              <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded">🌿 USDA</span>
-                            )}
-                            {container.has_tmf_hold && (
-                              <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">💰 TMF</span>
-                            )}
-                            {!container.has_customs_hold && !container.has_freight_hold && !container.has_usda_hold && !container.has_tmf_hold && (
-                              <span className="text-green-600 text-sm">✓ Clear</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {container.vessel_name || '-'}
-                          {container.voyage_number && <span className="text-gray-500 ml-1">/ {container.voyage_number}</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`font-semibold ${isLfdUrgent(container.last_free_day) ? 'text-red-600' : ''}`}>
-                            {formatDate(container.last_free_day)}
-                          </span>
-                          {container.demurrage_amount > 0 && (
-                            <div className="text-xs text-red-600">${container.demurrage_amount} demurrage</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <div>{container.shipments?.customer_name || '-'}</div>
-                          <div className="text-xs text-gray-500">→ {container.shipments?.delivery_city}</div>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          {formatDateTime(container.last_checked_at)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {filteredContainers.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No containers found
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Settings Tab */}
-          {activeTab === 'settings' && (
-            <div className="max-w-2xl">
-              <h3 className="text-lg font-semibold mb-6">eModal API Configuration</h3>
-              
-              <div className="space-y-6">
-                <div className="p-4 bg-blue-50 rounded-lg">
-                  <h4 className="font-medium text-blue-800 mb-2">📡 About eModal Integration</h4>
-                  <p className="text-sm text-blue-700">
-                    eModal provides real-time container availability, holds status, and appointment information 
-                    from LA/LB and Oakland terminals. Configure your API credentials below to enable automatic sync.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">API Username</label>
-                    <input
-                      type="text"
-                      value={configForm.api_username}
-                      onChange={e => setConfigForm({ ...configForm, api_username: e.target.value })}
-                      className="w-full px-4 py-2 border rounded-lg"
-                      placeholder="Your eModal username"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">API Password</label>
-                    <input
-                      type="password"
-                      value={configForm.api_password}
-                      onChange={e => setConfigForm({ ...configForm, api_password: e.target.value })}
-                      className="w-full px-4 py-2 border rounded-lg"
-                      placeholder={config?.api_password_encrypted ? '••••••••' : 'Enter password'}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">API Key (if applicable)</label>
-                  <input
-                    type="text"
-                    value={configForm.api_key}
-                    onChange={e => setConfigForm({ ...configForm, api_key: e.target.value })}
-                    className="w-full px-4 py-2 border rounded-lg font-mono text-sm"
-                    placeholder="Optional API key"
-                  />
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={configForm.auto_refresh_enabled}
-                      onChange={e => setConfigForm({ ...configForm, auto_refresh_enabled: e.target.checked })}
-                      className="rounded"
-                    />
-                    <span>Enable Auto-Refresh</span>
-                  </label>
-                </div>
-
-                {configForm.auto_refresh_enabled && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Refresh Interval</label>
-                    <select
-                      value={configForm.refresh_interval_minutes}
-                      onChange={e => setConfigForm({ ...configForm, refresh_interval_minutes: parseInt(e.target.value) })}
-                      className="px-4 py-2 border rounded-lg"
-                    >
-                      <option value={15}>Every 15 minutes</option>
-                      <option value={30}>Every 30 minutes</option>
-                      <option value={60}>Every hour</option>
-                      <option value={120}>Every 2 hours</option>
-                      <option value={360}>Every 6 hours</option>
-                    </select>
-                  </div>
-                )}
-
-                <div className="flex gap-4">
-                  <button
-                    onClick={saveConfig}
-                    disabled={savingConfig}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+            ) : filteredTrips.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">No trips found</div>
+            ) : (
+              <div className="divide-y">
+                {filteredTrips.map((trip) => (
+                  <div
+                    key={trip.id}
+                    onClick={() => setSelectedTrip(trip)}
+                    className={`p-4 cursor-pointer hover:bg-gray-50 transition ${selectedTrip?.id === trip.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
                   >
-                    {savingConfig ? 'Saving...' : 'Save Configuration'}
-                  </button>
-                  <button
-                    onClick={triggerSync}
-                    disabled={syncing}
-                    className="px-6 py-2 border rounded-lg hover:bg-gray-50"
-                  >
-                    Test Connection
-                  </button>
-                </div>
-
-                {config && (
-                  <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                    <h4 className="font-medium mb-2">Current Status</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Last Sync:</span>
-                        <span className="ml-2">{config.last_sync_at ? formatDateTime(config.last_sync_at) : 'Never'}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Status:</span>
-                        <span className={`ml-2 ${config.sync_status === 'SUCCESS' ? 'text-green-600' : 'text-red-600'}`}>
-                          {config.sync_status || 'Unknown'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Containers Synced:</span>
-                        <span className="ml-2">{config.containers_synced || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Errors:</span>
-                        <span className="ml-2">{config.errors_count || 0}</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono font-semibold text-blue-600">{trip.trip_number}</span>
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${getStatusColor(trip.status)}`}>
+                        {getStatusIcon(trip.status)} {trip.status}
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      <div>📦 {trip.container_number || 'No container'}</div>
+                      <div>👤 {trip.driver?.first_name} {trip.driver?.last_name || 'Unassigned'}</div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {trip.pickup_location} → {trip.delivery_location}
                       </div>
                     </div>
                   </div>
-                )}
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Map & Details */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Placeholder Map */}
+          <div className="bg-white rounded-xl shadow overflow-hidden">
+            <div className="bg-gradient-to-br from-blue-100 to-blue-200 h-64 flex items-center justify-center relative">
+              <div className="text-center">
+                <div className="text-6xl mb-2">🗺️</div>
+                <p className="text-gray-600">Map Integration</p>
+                <p className="text-sm text-gray-500">Google Maps / Mapbox can be integrated here</p>
+              </div>
+              {/* Simulated truck markers */}
+              {activeTrips.slice(0, 3).map((trip, i) => (
+                <div 
+                  key={trip.id}
+                  className="absolute bg-blue-600 text-white px-2 py-1 rounded-full text-xs flex items-center gap-1 shadow-lg"
+                  style={{ top: `${20 + i * 25}%`, left: `${30 + i * 20}%` }}
+                >
+                  🚛 {trip.trip_number}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Selected Trip Details */}
+          {selectedTrip ? (
+            <div className="bg-white rounded-xl shadow p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">{selectedTrip.trip_number}</h3>
+                  <p className="text-gray-500">{selectedTrip.type}</p>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(selectedTrip.status)}`}>
+                  {getStatusIcon(selectedTrip.status)} {selectedTrip.status}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500 mb-1">Container</p>
+                  <p className="font-mono font-semibold">{selectedTrip.container_number || '-'}</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500 mb-1">Driver</p>
+                  <p className="font-semibold">{selectedTrip.driver?.first_name} {selectedTrip.driver?.last_name || 'Unassigned'}</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500 mb-1">Tractor</p>
+                  <p className="font-semibold">{selectedTrip.tractor?.unit_number || '-'}</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500 mb-1">Chassis</p>
+                  <p className="font-semibold">{selectedTrip.chassis?.chassis_number || '-'}</p>
+                </div>
+              </div>
+
+              {/* Route */}
+              <div className="mb-6">
+                <h4 className="font-semibold mb-3">Route</h4>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <p className="text-xs text-green-600 font-medium">PICKUP</p>
+                    <p className="font-semibold">{selectedTrip.pickup_location || '-'}</p>
+                  </div>
+                  <div className="text-2xl text-gray-400">→</div>
+                  <div className="flex-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-xs text-blue-600 font-medium">DELIVERY</p>
+                    <p className="font-semibold">{selectedTrip.delivery_location || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Update Buttons */}
+              <div>
+                <h4 className="font-semibold mb-3">Update Status</h4>
+                <div className="flex flex-wrap gap-2">
+                  {['DISPATCHED', 'EN_ROUTE', 'AT_PICKUP', 'LOADED', 'AT_DELIVERY', 'DELIVERED', 'COMPLETED'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => handleStatusUpdate(selectedTrip.id, status)}
+                      disabled={selectedTrip.status === status}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                        selectedTrip.status === status
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {getStatusIcon(status)} {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timeline */}
+              <div className="mt-6">
+                <h4 className="font-semibold mb-3">Timeline</h4>
+                <div className="space-y-3">
+                  {selectedTrip.actual_start && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                      <div className="text-sm">
+                        <span className="font-medium">Started</span>
+                        <span className="text-gray-500 ml-2">{new Date(selectedTrip.actual_start).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedTrip.pickup_arrival && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                      <div className="text-sm">
+                        <span className="font-medium">Arrived at Pickup</span>
+                        <span className="text-gray-500 ml-2">{new Date(selectedTrip.pickup_arrival).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedTrip.pickup_departure && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                      <div className="text-sm">
+                        <span className="font-medium">Left Pickup</span>
+                        <span className="text-gray-500 ml-2">{new Date(selectedTrip.pickup_departure).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedTrip.delivery_arrival && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                      <div className="text-sm">
+                        <span className="font-medium">Arrived at Delivery</span>
+                        <span className="text-gray-500 ml-2">{new Date(selectedTrip.delivery_arrival).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedTrip.actual_end && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-green-600 rounded-full"></div>
+                      <div className="text-sm">
+                        <span className="font-medium">Completed</span>
+                        <span className="text-gray-500 ml-2">{new Date(selectedTrip.actual_end).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          )}
-
-          {/* Logs Tab */}
-          {activeTab === 'logs' && (
-            <div>
-              <h3 className="text-lg font-semibold mb-4">Sync History</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {syncLogs.map(log => (
-                      <tr key={log.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm">{formatDateTime(log.synced_at)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">{log.containers_updated}</td>
-                        <td className="px-4 py-3 text-sm text-red-600">{log.containers_failed || 0}</td>
-                        <td className="px-4 py-3 text-sm">{log.duration_ms}ms</td>
-                        <td className="px-4 py-3 text-sm text-red-600">{log.error_message || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {syncLogs.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">No sync logs yet</div>
-                )}
-              </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow p-12 text-center">
+              <div className="text-6xl mb-4">👆</div>
+              <p className="text-gray-500">Select a trip to view details</p>
             </div>
           )}
         </div>
