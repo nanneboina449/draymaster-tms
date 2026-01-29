@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "lib": [
       "dom",
@@ -16,10 +16,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    },
     "plugins": [
       {
         "name": "next"
