@@ -1,8 +1,25 @@
 # Migration Summary - Quick Reference
 
-## 📦 Single SQL File to Run
+## ⚠️ NEW DATABASE? START HERE!
+
+If this is a **new database setup**, use the complete migration script:
+
+```bash
+psql -h localhost -U your_username -d draymaster_tms -f migrations/000_complete_migration.sql
+```
+
+This runs ALL migrations in the correct order:
+1. Base order service schema
+2. Base dispatch service schema
+3. Production enhancements
+
+---
+
+## 📦 Single Enhancement File (For Existing Databases)
 
 **File:** `migrations/001_production_enhancements.sql`
+
+**Prerequisites:** Base tables must exist (orders, trips, trip_stops, containers)
 
 **Quick Command:**
 ```bash
