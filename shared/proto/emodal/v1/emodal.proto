@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package emodal.v1;
+
+option go_package = "github.com/draymaster/shared/proto/emodal/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// EModalIntegrationService provides real-time terminal and container data from eModal EDS.
+// Run `make proto` to generate Go code from this definition.
+service EModalIntegrationService {
+  // GetAppointmentAvailability queries eModal for available gate appointment slots.
+  rpc GetAppointmentAvailability(AvailabilityRequest) returns (AvailabilityResponse);
+
+  // GetDwellStats retrieves container dwell time statistics from eModal.
+  rpc GetDwellStats(DwellStatsRequest) returns (DwellStatsResponse);
+
+  // PublishContainers registers containers with eModal for real-time status tracking.
+  rpc PublishContainers(PublishContainersRequest) returns (PublishContainersResponse);
+
+  // GetGateFees retrieves all fees assessed on a container by the terminal.
+  rpc GetGateFees(GateFeesRequest) returns (GateFeesResponse);
+
+  // GetContainerStatus returns the latest eModal status for containers.
+  rpc GetContainerStatus(ContainerStatusRequest) returns (ContainerStatusResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Appointment Availability
+// ---------------------------------------------------------------------------
+
+message AvailabilityRequest {
+  string terminal_id    = 1;
+  google.protobuf.Timestamp date = 2;
+  string move_type      = 3; // IP, ID, XP, XD, MP, MD, BP, BD
+  string container_size = 4; // 20, 40, 45
+}
+
+message AvailabilityResponse {
+  repeated AppointmentSlot slots = 1;
+}
+
+message AppointmentSlot {
+  google.protobuf.Timestamp slot_time = 1;
+  int32  capacity  = 2;
+  int32  available = 3;
+  string move_type = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Dwell Statistics
+// ---------------------------------------------------------------------------
+
+message DwellStatsRequest {
+  string terminal_id = 1;
+  google.protobuf.Timestamp start_date = 2;
+  google.protobuf.Timestamp end_date   = 3;
+  repeated string container_numbers    = 4; // empty = all containers in range
+}
+
+message DwellStatsResponse {
+  repeated DwellStat stats      = 1;
+  double average_dwell_hours    = 2;
+}
+
+message DwellStat {
+  string terminal_code    = 1;
+  string container_number = 2;
+  google.protobuf.Timestamp discharge_date = 3;
+  google.protobuf.Timestamp gate_out_date  = 4;
+  double dwell_hours = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Container Publishing
+// ---------------------------------------------------------------------------
+
+message PublishContainersRequest {
+  repeated ContainerToPublish containers = 1;
+}
+
+message ContainerToPublish {
+  string container_number = 1;
+  string terminal_code    = 2;
+  string port_code        = 3;
+}
+
+message PublishContainersResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string published_containers = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Gate Fees
+// ---------------------------------------------------------------------------
+
+message GateFeesRequest {
+  string container_id     = 1;
+  string container_number = 2;
+}
+
+message GateFeesResponse {
+  repeated GateFee fees = 1;
+  double total_amount   = 2;
+}
+
+message GateFee {
+  string id               = 1;
+  string container_id     = 2;
+  string container_number = 3;
+  string order_id         = 4;
+  string terminal_id      = 5;
+  string type             = 6;  // DEMURRAGE, STORAGE, GATE_FEE, EXTENDED_GATE_FEE, PER_DIEM, CUSTOMS_EXAM
+  double amount           = 7;
+  string currency         = 8;
+  string billable_to      = 9;
+  string status           = 10; // PENDING, ASSESSED, PAID, WAIVED, DISPUTED
+  string emodal_fee_id    = 11;
+  google.protobuf.Timestamp assessed_at = 12;
+  google.protobuf.Timestamp paid_at     = 13;
+}
+
+// ---------------------------------------------------------------------------
+// Container Status
+// ---------------------------------------------------------------------------
+
+message ContainerStatusRequest {
+  repeated string container_numbers = 1;
+}
+
+message ContainerStatusResponse {
+  repeated ContainerStatusInfo statuses = 1;
+}
+
+message ContainerStatusInfo {
+  string container_number      = 1;
+  string status                = 2; // MANIFESTED, DISCHARGED, IN_YARD, AVAILABLE, ON_HOLD, CUSTOMS_HOLD, GATE_IN, GATE_OUT, RELEASED, LOADED
+  string terminal_code         = 3;
+  string terminal_name         = 4;
+  string location_description  = 5;
+  google.protobuf.Timestamp last_updated = 6;
+}

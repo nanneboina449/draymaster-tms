@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "WebFetch(domain:apidocs.eds.emodal.com)",
+      "WebFetch(domain:adventintermodal.com)",
+      "WebFetch(domain:cargosprint.com)",
+      "WebFetch(domain:help.emodal.com)"
     ]
   }
 }

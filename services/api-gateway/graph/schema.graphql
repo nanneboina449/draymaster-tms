@@ -46,6 +46,13 @@ type Query {
   # Drivers
   driver(id: UUID!): Driver
   drivers(filter: DriverFilter): [Driver!]!
+
+  # Terminal Appointments & eModal
+  terminalAppointment(id: UUID!): TerminalAppointment
+  terminalAppointments(filter: AppointmentFilter!, pagination: PaginationInput): AppointmentConnection!
+  appointmentAvailability(input: AppointmentAvailabilityInput!): [AppointmentSlot!]!
+  containerDwellStats(input: DwellStatsInput!): [ContainerDwellStat!]!
+  gateFees(containerId: UUID!): [GateFee!]!
 }
 
 """
@@ -81,6 +88,11 @@ type Mutation {
   recordLocation(input: RecordLocationInput!): LocationRecord!
   recordMilestone(input: RecordMilestoneInput!): Milestone!
   createGeofence(input: CreateGeofenceInput!): Geofence!
+
+  # Terminal Appointments (eModal)
+  requestAppointment(input: RequestAppointmentInput!): TerminalAppointment!
+  cancelAppointment(id: UUID!, reason: String!): TerminalAppointment!
+  rescheduleAppointment(id: UUID!, input: RescheduleAppointmentInput!): TerminalAppointment!
 }
 
 """
@@ -92,6 +104,7 @@ type Subscription {
   geofenceEvent(locationIds: [UUID!]): GeofenceEvent!
   containerAvailable(shipmentId: UUID): ContainerAvailableEvent!
   lfdApproaching(daysThreshold: Int): LFDAlertEvent!
+  containerStatusUpdated(containerNumbers: [String!]!): ContainerStatusEvent!
 }
 
 # ============== Types ==============
@@ -471,6 +484,63 @@ type ContainerAvailability {
   availableDate: DateTime
 }
 
+# eModal Terminal Appointment & Fee Types
+
+type TerminalAppointment {
+  id: UUID!
+  orderId: UUID!
+  tripId: UUID
+  terminalId: UUID!
+  terminalName: String!
+  type: AppointmentType!
+  status: AppointmentStatus!
+  moveType: EModalMoveType!
+  containerNumber: String!
+  containerSize: ContainerSize!
+  chassisNumber: String
+  windowStart: DateTime!
+  windowEnd: DateTime!
+  confirmationNumber: String
+  eModalAppointmentId: String
+  createdBy: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type AppointmentSlot {
+  time: DateTime!
+  capacity: Int!
+  available: Int!
+  moveType: EModalMoveType!
+}
+
+type ContainerDwellStat {
+  terminalCode: String!
+  containerNumber: String
+  dischargeDate: DateTime
+  gateOutDate: DateTime
+  dwellHours: Float!
+  averageDwellHours: Float
+}
+
+type GateFee {
+  id: UUID!
+  containerId: UUID
+  containerNumber: String!
+  orderId: UUID
+  terminalId: UUID
+  terminalCode: String
+  type: GateFeeType!
+  amount: Float!
+  currency: String!
+  billedTo: String
+  status: GateFeeStatus!
+  eModalFeeId: String
+  assessedAt: DateTime
+  paidAt: DateTime
+  createdAt: DateTime!
+}
+
 # Subscription Event Types
 type TripStatusEvent {
   tripId: UUID!
@@ -519,6 +589,16 @@ type LFDAlertEvent {
   containersAtRisk: Int!
 }
 
+type ContainerStatusEvent {
+  containerNumber: String!
+  status: EModalContainerStatus!
+  terminalCode: String
+  terminalName: String
+  locationDescription: String
+  occurredAt: DateTime!
+  previousStatus: EModalContainerStatus
+}
+
 # Connection Types for Pagination
 type ShipmentConnection {
   edges: [ShipmentEdge!]!
@@ -550,6 +630,17 @@ type TripConnection {
 
 type TripEdge {
   node: Trip!
+  cursor: String!
+}
+
+type AppointmentConnection {
+  edges: [AppointmentEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type AppointmentEdge {
+  node: TerminalAppointment!
   cursor: String!
 }
 
@@ -759,6 +850,48 @@ input StreetTurnFilter {
   maxResults: Int
 }
 
+input AppointmentFilter {
+  orderId: UUID
+  terminalId: UUID
+  status: AppointmentStatus
+  type: AppointmentType
+  dateFrom: DateTime
+  dateTo: DateTime
+  containerNumber: String
+}
+
+input RequestAppointmentInput {
+  orderId: UUID!
+  terminalId: UUID!
+  type: AppointmentType!
+  moveType: EModalMoveType!
+  containerNumber: String!
+  containerSize: ContainerSize!
+  preferredDate: DateTime!
+  preferredTimeSlot: DateTime
+  chassisNumber: String
+}
+
+input RescheduleAppointmentInput {
+  newDate: DateTime!
+  newTimeSlot: DateTime
+  reason: String
+}
+
+input AppointmentAvailabilityInput {
+  terminalId: UUID!
+  date: DateTime!
+  moveType: EModalMoveType!
+  containerSize: ContainerSize
+}
+
+input DwellStatsInput {
+  terminalId: UUID!
+  startDate: DateTime!
+  endDate: DateTime!
+  containerNumbers: [String!]
+}
+
 input PaginationInput {
   first: Int
   after: String
@@ -932,6 +1065,67 @@ enum EquipmentStatus {
   IN_USE
   MAINTENANCE
   OUT_OF_SERVICE
+}
+
+# eModal enums
+
+enum AppointmentType {
+  PICKUP
+  RETURN
+  DROP_OFF
+  DUAL
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  MISSED
+  NO_SHOW
+}
+
+enum EModalMoveType {
+  IP   # Import Pickup
+  ID   # Import Drop (Dray)
+  XP   # Export Pickup (Dray)
+  XD   # Export Drop
+  MP   # Empty Pickup
+  MD   # Empty Drop
+  BP   # Chassis Pickup
+  BD   # Chassis Drop
+}
+
+enum EModalContainerStatus {
+  MANIFESTED
+  DISCHARGED
+  IN_YARD
+  AVAILABLE
+  ON_HOLD
+  CUSTOMS_HOLD
+  GATE_IN
+  GATE_OUT
+  RELEASED
+  LOADED
+  NOT_MANIFESTED
+}
+
+enum GateFeeType {
+  DEMURRAGE
+  STORAGE
+  GATE_FEE
+  EXTENDED_GATE_FEE
+  PER_DIEM
+  CUSTOMS_EXAM
+}
+
+enum GateFeeStatus {
+  PENDING
+  ASSESSED
+  PAID
+  WAIVED
+  DISPUTED
 }
 
 scalar JSON
