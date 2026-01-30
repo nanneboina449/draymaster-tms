@@ -8,7 +8,7 @@ GOMOD=$(GOCMD) mod
 GOVET=$(GOCMD) vet
 
 # Services
-SERVICES=order-service dispatch-service tracking-service billing-service driver-service equipment-service api-gateway
+SERVICES=order-service dispatch-service tracking-service billing-service driver-service equipment-service emodal-integration api-gateway
 
 # Docker
 DOCKER_COMPOSE=docker-compose

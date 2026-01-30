@@ -238,6 +238,12 @@ var Topics = struct {
 	InvoiceGenerated  string
 	InvoiceSent       string
 	PaymentReceived   string
+
+	// eModal Integration Service
+	EModalContainerStatusUpdated string
+	EModalGateIn                 string
+	EModalGateOut                string
+	EModalContainerPublished     string
 }{
 	ShipmentCreated:    "orders.shipment.created",
 	ShipmentUpdated:    "orders.shipment.updated",
@@ -269,4 +275,10 @@ var Topics = struct {
 	InvoiceGenerated:   "billing.invoice.generated",
 	InvoiceSent:        "billing.invoice.sent",
 	PaymentReceived:    "billing.payment.received",
+
+	// eModal Integration Service
+	EModalContainerStatusUpdated: "emodal.container.status_updated",
+	EModalGateIn:                 "emodal.container.gate_in",
+	EModalGateOut:                "emodal.container.gate_out",
+	EModalContainerPublished:     "emodal.container.published",
 }
