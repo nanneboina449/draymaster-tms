@@ -6,6 +6,57 @@ This directory contains SQL migration scripts for the DrayMaster TMS database sc
 
 ---
 
+## ⚠️ IMPORTANT: Migration Order
+
+**If you're setting up a new database, you MUST run migrations in the correct order:**
+
+### Quick Start (Recommended)
+
+Use the master migration script that runs everything in the correct order:
+
+```bash
+# Backup first (always!)
+pg_dump -h localhost -U postgres draymaster_tms > backup.sql
+
+# Run complete migration (easiest method)
+psql -h localhost -U postgres -d draymaster_tms -f migrations/000_complete_migration.sql
+```
+
+This single command will:
+1. Create all base tables (orders, containers, trips, trip_stops, etc.)
+2. Apply production enhancements (appointments, exceptions, indexes, views)
+3. Run verification checks
+4. Show you the results
+
+### Manual Migration Order
+
+If you prefer to run migrations manually, use this order:
+
+```bash
+# Step 1: Order Service Base Schema
+psql -h localhost -U postgres -d draymaster_tms -f services/order-service/migrations/000001_init_schema.up.sql
+
+# Step 2: Dispatch Service Base Schema
+psql -h localhost -U postgres -d draymaster_tms -f services/dispatch-service/migrations/000001_init_schema.up.sql
+
+# Step 3: Production Enhancements
+psql -h localhost -U postgres -d draymaster_tms -f migrations/001_production_enhancements.sql
+```
+
+### Why Order Matters
+
+The production enhancements migration references tables created in the base schemas:
+- `terminal_appointments` has foreign keys to `orders(id)` and `trips(id)`
+- `exceptions` has foreign keys to `trips(id)` and `trip_stops(id)`
+- Enhanced columns are added to existing `orders`, `trips`, and `trip_stops` tables
+
+**Error you'll see if you skip base schemas:**
+```
+ERROR: 42P01: relation "trip_stops" does not exist
+```
+
+---
+
 ## 📋 Migration: 001_production_enhancements.sql
 
 **File:** `001_production_enhancements.sql`
