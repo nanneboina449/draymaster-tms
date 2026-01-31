@@ -6,7 +6,7 @@ import { ShipmentList } from '../../components/shipments/ShipmentList';
 import { EditShipmentModal } from '../../components/shipments/EditShipmentModal';
 import { ViewShipmentModal } from '../../components/shipments/ViewShipmentModal';
 import { DeleteConfirmModal } from '../../components/shipments/DeleteConfirmModal';
-import { getShipments, createShipment, deleteShipment, updateShipmentStatus, Shipment } from '../../lib/supabase';
+import { getShipments, createShipmentWithOrders, deleteShipment, updateShipmentStatus, Shipment } from '../../lib/supabase';
 
 export default function LoadsPage() {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -72,7 +72,17 @@ export default function LoadsPage() {
         reefer_temp: parseInt(c.reeferTemp) || null,
         customs_status: c.customsStatus,
       })) || [];
-      await createShipment(shipmentData, containers);
+
+      // Use new order-centric function that auto-creates orders
+      await createShipmentWithOrders(shipmentData, containers, {
+        address: formData.deliveryLocation?.address,
+        city: formData.deliveryLocation?.city,
+        state: formData.deliveryLocation?.state,
+        zip: formData.deliveryLocation?.zip,
+        contactName: formData.deliveryLocation?.contactName,
+        contactPhone: formData.deliveryLocation?.contactPhone,
+      });
+
       await fetchShipments();
       setIsNewModalOpen(false);
     } catch (err: any) {
@@ -123,11 +133,11 @@ export default function LoadsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Loads</h1>
-          <p className="text-gray-500 mt-1">Manage import and export loads</p>
+          <h1 className="text-3xl font-bold text-gray-900">Shipments</h1>
+          <p className="text-gray-500 mt-1">Manage import and export shipments</p>
         </div>
         <button onClick={() => setIsNewModalOpen(true)} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium">
-          <span className="text-xl">+</span> New Load
+          <span className="text-xl">+</span> New Shipment
         </button>
       </div>
 

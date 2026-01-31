@@ -1,33 +1,82 @@
-// Enums
+// ==============================================================================
+// DrayMaster TMS - TypeScript Types (Order-Centric Model)
+// ==============================================================================
+
+// ─── Core Enums ──────────────────────────────────────────────────────────────
+
 export type ShipmentType = 'IMPORT' | 'EXPORT';
 
-export type ShipmentStatus = 
-  | 'PENDING' 
-  | 'CONFIRMED' 
-  | 'IN_PROGRESS' 
-  | 'DELIVERED' 
-  | 'COMPLETED' 
+export type ShipmentStatus =
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'IN_PROGRESS'
+  | 'DELIVERED'
+  | 'COMPLETED'
   | 'CANCELLED';
 
-export type ContainerSize = '20' | '40' | '45';
+export type ContainerSize = '20' | '40' | '40HC' | '45';
 
-export type ContainerType = 
-  | 'DRY' 
-  | 'HIGH_CUBE' 
-  | 'REEFER' 
-  | 'TANK' 
-  | 'FLAT_RACK' 
+export type ContainerType =
+  | 'DRY'
+  | 'HIGH_CUBE'
+  | 'REEFER'
+  | 'TANK'
+  | 'FLAT_RACK'
   | 'OPEN_TOP';
 
 export type CustomsStatus = 'PENDING' | 'HOLD' | 'RELEASED';
 
-export type ContainerState = 
-  | 'LOADED' 
-  | 'EMPTY' 
-  | 'AT_TERMINAL' 
-  | 'IN_TRANSIT' 
-  | 'AT_CUSTOMER' 
-  | 'RETURNED';
+// Container lifecycle status (tracks where container is in the process)
+export type ContainerLifecycleStatus =
+  | 'BOOKED'        // Container on booking, not yet available
+  | 'AVAILABLE'     // Available at terminal for pickup
+  | 'PICKED_UP'     // Picked up, in transit
+  | 'DELIVERED'     // Delivered to customer (loaded)
+  | 'DROPPED'       // Dropped at customer location
+  | 'EMPTY_PICKED'  // Empty picked up from customer
+  | 'RETURNED'      // Empty returned to terminal
+  | 'COMPLETED';    // All movements complete
+
+// ─── Order Enums ─────────────────────────────────────────────────────────────
+
+// Order type (what kind of movement)
+export type OrderType = 'IMPORT' | 'EXPORT' | 'REPO' | 'EMPTY_RETURN';
+
+// Order move type (more specific classification)
+export type OrderMoveType =
+  | 'IMPORT_DELIVERY'   // Terminal → Customer (deliver import)
+  | 'EXPORT_PICKUP'     // Customer → Terminal (pick up export)
+  | 'EMPTY_RETURN'      // Customer → Terminal (return empty)
+  | 'EMPTY_PICKUP'      // Terminal → Customer (pick up empty for loading)
+  | 'YARD_PULL'         // Terminal → Yard (prepull to company yard)
+  | 'YARD_DELIVERY'     // Yard → Customer (deliver from yard)
+  | 'REPO';             // Any location → Any location (reposition)
+
+// How the physical movement is executed
+export type TripExecutionType =
+  | 'LIVE_UNLOAD'     // Driver waits while container is unloaded
+  | 'LIVE_LOAD'       // Driver waits while container is loaded
+  | 'DROP'            // Drop container, leave
+  | 'DROP_AND_HOOK'   // Drop one container, pick up another
+  | 'STREET_TURN'     // Import container reused for export
+  | 'PREPULL'         // Pull from terminal to yard before delivery
+  | 'REPO';           // Reposition container
+
+// Order status
+export type OrderStatus =
+  | 'PENDING'       // Order created, not ready
+  | 'READY'         // Ready for dispatch (customs cleared, appointment set)
+  | 'DISPATCHED'    // Assigned to driver/trip
+  | 'IN_PROGRESS'   // Driver is working on it
+  | 'DELIVERED'     // Delivered (for import) or picked up (for export)
+  | 'COMPLETED'     // All done
+  | 'HOLD'          // On hold (customs, appointment, etc.)
+  | 'CANCELLED'     // Cancelled
+  | 'FAILED';       // Failed, needs retry
+
+export type BillingStatus = 'UNBILLED' | 'INVOICED' | 'PAID';
+
+// ─── Trip Enums ──────────────────────────────────────────────────────────────
 
 export type TripType =
   | 'LIVE_LOAD'
@@ -58,7 +107,8 @@ export type TripStatus =
 
 export type ChassisPool = 'DCLI' | 'TRAC' | 'FLEXI' | 'COMPANY' | 'OTHER';
 
-// Interfaces
+// ─── Interfaces ──────────────────────────────────────────────────────────────
+
 export interface Location {
   id: string;
   name: string;
@@ -75,12 +125,14 @@ export interface Location {
   operatingHours?: string;
 }
 
+// Container: Physical shipping container
 export interface Container {
   id: string;
+  shipmentId: string;
   containerNumber: string;
   size: ContainerSize;
   type: ContainerType;
-  weight: number;
+  weight?: number;
   sealNumber?: string;
   isHazmat: boolean;
   hazmatClass?: string;
@@ -90,63 +142,125 @@ export interface Container {
   reeferTemp?: number;
   customsStatus: CustomsStatus;
   customsHoldReason?: string;
-  state: ContainerState;
+  lifecycleStatus: ContainerLifecycleStatus;
   terminalAvailableDate?: string;
-  lastFreeDay?: string;
-  currentLocation?: string;
+  terminalAppointment?: string;
+  // Related data (populated when fetching)
+  orders?: Order[];
 }
 
+// Shipment: Customer booking (top level entity)
 export interface Shipment {
   id: string;
   referenceNumber: string;
   type: ShipmentType;
   status: ShipmentStatus;
-  customerId: string;
+  // Customer
+  customerId?: string;
   customerName: string;
+  // Vessel/Carrier info
   steamshipLine: string;
   bookingNumber?: string;
   billOfLading?: string;
   vessel?: string;
   voyage?: string;
-  terminalId: string;
+  // Terminal
+  terminalId?: string;
   terminalName: string;
+  // Dates
   vesselETA?: string;
-  lastFreeDay?: string;
-  portCutoff?: string;
-  earliestReturnDate?: string;
+  lastFreeDay?: string;        // Import: last free day at terminal
+  portCutoff?: string;         // Export: cargo cutoff time
+  earliestReturnDate?: string; // Export: earliest empty return
+  // Related data
   containers: Container[];
-  pickupLocation?: Location;
-  deliveryLocation?: Location;
+  // Delivery info (for simple single-destination shipments)
+  deliveryAddress?: string;
+  deliveryCity?: string;
+  deliveryState?: string;
+  deliveryZip?: string;
+  deliveryContactName?: string;
+  deliveryContactPhone?: string;
+  // Additional
+  tripType?: TripExecutionType;
   specialInstructions?: string;
+  chassisRequired?: boolean;
+  chassisPool?: string;
+  chassisSize?: string;
+  // Timestamps
   createdAt: string;
   updatedAt: string;
 }
 
+// Order: Work order for a specific container movement
 export interface Order {
   id: string;
   orderNumber: string;
   shipmentId: string;
   containerId: string;
-  containerNumber: string;
-  type: ShipmentType;
-  status: 'PENDING' | 'READY' | 'DISPATCHED' | 'IN_PROGRESS' | 'DELIVERED' | 'COMPLETED';
-  pickupLocation: Location;
-  deliveryLocation: Location;
-  appointmentDate?: string;
-  appointmentTime?: string;
+  // Type classification
+  type: OrderType;
+  moveType?: OrderMoveType;
+  tripExecutionType: TripExecutionType;
+  // Sequence (for multi-order containers)
+  sequenceNumber: number;
+  // Status
+  status: OrderStatus;
+  billingStatus: BillingStatus;
+  // Pickup location
+  pickupLocationId?: string;
+  pickupAddress?: string;
+  pickupCity?: string;
+  pickupState?: string;
+  pickupZip?: string;
+  pickupContactName?: string;
+  pickupContactPhone?: string;
+  pickupAppointment?: string;
+  pickupAppointmentRequired?: boolean;
+  // Delivery location
+  deliveryLocationId?: string;
+  deliveryAddress?: string;
+  deliveryCity?: string;
+  deliveryState?: string;
+  deliveryZip?: string;
+  deliveryContactName?: string;
+  deliveryContactPhone?: string;
+  deliveryAppointment?: string;
+  deliveryAppointmentRequired?: boolean;
+  // Assignment
+  assignedDriverId?: string;
+  assignedDriverName?: string;
+  assignedTripId?: string;
+  assignedTripNumber?: string;
+  // Timestamps
+  dispatchedAt?: string;
+  pickedUpAt?: string;
+  deliveredAt?: string;
+  completedAt?: string;
+  // Billing
+  baseRate?: number;
+  fuelSurcharge?: number;
+  totalCharges?: number;
+  // Notes
   specialInstructions?: string;
-  billingStatus: 'UNBILLED' | 'PENDING' | 'INVOICED' | 'PAID';
+  // Related data (populated when fetching)
+  container?: Container;
+  shipment?: Shipment;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
+// Trip: Driver assignment (execution of orders)
 export interface Trip {
   id: string;
   tripNumber: string;
   type: TripType;
   status: TripStatus;
-  orderId?: string;
+  // Primary order (for simple single-order trips)
+  primaryOrderId?: string;
+  // Related orders (for multi-order trips)
   orders?: Order[];
-  containerId?: string;
-  containerNumber?: string;
+  // Assignment
   driverId?: string;
   driverName?: string;
   tractorId?: string;
@@ -154,17 +268,25 @@ export interface Trip {
   chassisId?: string;
   chassisNumber?: string;
   chassisPool?: ChassisPool;
+  // Stops
   stops: TripStop[];
+  // Timing
   plannedStartTime?: string;
   actualStartTime?: string;
   plannedEndTime?: string;
   actualEndTime?: string;
+  // Distance
   estimatedMiles?: number;
   actualMiles?: number;
+  // Special flags
   isStreetTurn: boolean;
   linkedTripId?: string;
   isDualTransaction: boolean;
+  // Notes
   notes?: string;
+  // Timestamps
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface TripStop {
@@ -183,8 +305,9 @@ export interface TripStop {
 
 export interface Driver {
   id: string;
-  firstName: string;
-  lastName: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
   phone: string;
   email?: string;
   licenseNumber: string;
@@ -221,6 +344,44 @@ export interface StreetTurnOpportunity {
   validUntil: string;
   status: 'AVAILABLE' | 'MATCHED' | 'EXPIRED';
 }
+
+// ─── Dispatch Board Types ────────────────────────────────────────────────────
+
+// Dispatch board item (order view for dispatch)
+export interface DispatchBoardItem {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: OrderStatus;
+  moveType: OrderMoveType;
+  tripExecutionType: TripExecutionType;
+  pickupAppointment?: string;
+  deliveryAppointment?: string;
+  sequenceNumber: number;
+  // Container info
+  containerId: string;
+  containerNumber: string;
+  containerSize: ContainerSize;
+  containerType: ContainerType;
+  isHazmat: boolean;
+  isOverweight: boolean;
+  customsStatus: CustomsStatus;
+  lifecycleStatus: ContainerLifecycleStatus;
+  // Shipment info
+  shipmentId: string;
+  shipmentReference: string;
+  shipmentType: ShipmentType;
+  customerName: string;
+  terminalName: string;
+  lastFreeDay?: string;
+  portCutoff?: string;
+  // Assignment
+  assignedDriverId?: string;
+  driverName?: string;
+  assignedTripId?: string;
+  tripNumber?: string;
+}
+
+// ─── Display Info ────────────────────────────────────────────────────────────
 
 // Trip Type Display Info
 export const TRIP_TYPE_INFO: Record<TripType, { label: string; description: string; icon: string; color: string }> = {
@@ -296,4 +457,60 @@ export const TRIP_TYPE_INFO: Record<TripType, { label: string; description: stri
     icon: '🔀',
     color: 'bg-amber-100 text-amber-800',
   },
+};
+
+// Trip Execution Type Display Info
+export const TRIP_EXECUTION_INFO: Record<TripExecutionType, { label: string; description: string }> = {
+  LIVE_UNLOAD: {
+    label: 'Live Unload',
+    description: 'Driver waits while container is unloaded',
+  },
+  LIVE_LOAD: {
+    label: 'Live Load',
+    description: 'Driver waits while container is loaded',
+  },
+  DROP: {
+    label: 'Drop',
+    description: 'Drop container and leave (pick up later)',
+  },
+  DROP_AND_HOOK: {
+    label: 'Drop & Hook',
+    description: 'Drop loaded, pick up empty (or vice versa)',
+  },
+  STREET_TURN: {
+    label: 'Street Turn',
+    description: 'Reuse import container for export',
+  },
+  PREPULL: {
+    label: 'Pre-Pull',
+    description: 'Pull to yard before delivery date',
+  },
+  REPO: {
+    label: 'Reposition',
+    description: 'Move container between locations',
+  },
+};
+
+// Order Move Type Display Info
+export const ORDER_MOVE_INFO: Record<OrderMoveType, { label: string; icon: string }> = {
+  IMPORT_DELIVERY: { label: 'Import Delivery', icon: '📥' },
+  EXPORT_PICKUP: { label: 'Export Pickup', icon: '📤' },
+  EMPTY_RETURN: { label: 'Empty Return', icon: '🔙' },
+  EMPTY_PICKUP: { label: 'Empty Pickup', icon: '📦' },
+  YARD_PULL: { label: 'Yard Pull', icon: '🏭' },
+  YARD_DELIVERY: { label: 'Yard Delivery', icon: '🚚' },
+  REPO: { label: 'Reposition', icon: '↔️' },
+};
+
+// Order Status Display Info
+export const ORDER_STATUS_INFO: Record<OrderStatus, { label: string; color: string }> = {
+  PENDING: { label: 'Pending', color: 'bg-gray-100 text-gray-800' },
+  READY: { label: 'Ready', color: 'bg-green-100 text-green-800' },
+  DISPATCHED: { label: 'Dispatched', color: 'bg-blue-100 text-blue-800' },
+  IN_PROGRESS: { label: 'In Progress', color: 'bg-yellow-100 text-yellow-800' },
+  DELIVERED: { label: 'Delivered', color: 'bg-purple-100 text-purple-800' },
+  COMPLETED: { label: 'Completed', color: 'bg-green-100 text-green-800' },
+  HOLD: { label: 'On Hold', color: 'bg-red-100 text-red-800' },
+  CANCELLED: { label: 'Cancelled', color: 'bg-gray-100 text-gray-500' },
+  FAILED: { label: 'Failed', color: 'bg-red-100 text-red-800' },
 };

@@ -387,7 +387,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">New Load Entry</h2>
+              <h2 className="text-xl font-bold text-white">New Shipment</h2>
               <button onClick={onClose} className="text-white hover:text-gray-200 text-2xl">
                 ×
               </button>
@@ -402,7 +402,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
             {step === 0 && (
               <div className="space-y-6">
                 <div className="text-center mb-8">
-                  <h3 className="text-xl font-semibold text-gray-800">How would you like to enter load information?</h3>
+                  <h3 className="text-xl font-semibold text-gray-800">How would you like to enter shipment information?</h3>
                   <p className="text-gray-500 mt-2">Upload a document for automatic extraction or enter details manually</p>
                 </div>
 

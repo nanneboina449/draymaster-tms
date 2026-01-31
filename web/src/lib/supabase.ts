@@ -1285,3 +1285,489 @@ export async function getShipmentAsLoad(containerId: string): Promise<Load | nul
 export async function autoCalculateCharges(loadId: string): Promise<void> {
   console.log('autoCalculateCharges: not yet implemented for', loadId);
 }
+
+// ============================================================================
+// ORDER-CENTRIC MODEL FUNCTIONS (New)
+// ============================================================================
+
+// Types for order-centric model
+export type OrderMoveType =
+  | 'IMPORT_DELIVERY'
+  | 'EXPORT_PICKUP'
+  | 'EMPTY_RETURN'
+  | 'EMPTY_PICKUP'
+  | 'YARD_PULL'
+  | 'YARD_DELIVERY'
+  | 'REPO';
+
+export type TripExecutionType =
+  | 'LIVE_UNLOAD'
+  | 'LIVE_LOAD'
+  | 'DROP'
+  | 'DROP_AND_HOOK'
+  | 'STREET_TURN'
+  | 'PREPULL'
+  | 'REPO';
+
+export type OrderStatus =
+  | 'PENDING'
+  | 'READY'
+  | 'DISPATCHED'
+  | 'IN_PROGRESS'
+  | 'DELIVERED'
+  | 'COMPLETED'
+  | 'HOLD'
+  | 'CANCELLED'
+  | 'FAILED';
+
+export type ContainerLifecycleStatus =
+  | 'BOOKED'
+  | 'AVAILABLE'
+  | 'PICKED_UP'
+  | 'DELIVERED'
+  | 'DROPPED'
+  | 'EMPTY_PICKED'
+  | 'RETURNED'
+  | 'COMPLETED';
+
+export interface OrderV2 {
+  id: string;
+  order_number: string;
+  shipment_id: string;
+  container_id: string;
+  type: string;
+  move_type_v2?: OrderMoveType;
+  trip_execution_type?: TripExecutionType;
+  sequence_number: number;
+  status: OrderStatus;
+  billing_status: string;
+  // Pickup
+  pickup_location_id?: string;
+  pickup_address?: string;
+  pickup_city?: string;
+  pickup_state?: string;
+  pickup_zip?: string;
+  pickup_contact_name?: string;
+  pickup_contact_phone?: string;
+  pickup_appointment?: string;
+  pickup_appointment_required?: boolean;
+  // Delivery
+  delivery_location_id?: string;
+  delivery_address?: string;
+  delivery_city?: string;
+  delivery_state?: string;
+  delivery_zip?: string;
+  delivery_contact_name?: string;
+  delivery_contact_phone?: string;
+  delivery_appointment?: string;
+  delivery_appointment_required?: boolean;
+  // Assignment
+  assigned_driver_id?: string;
+  assigned_trip_id?: string;
+  // Timestamps
+  dispatched_at?: string;
+  picked_up_at?: string;
+  delivered_at?: string;
+  completed_at?: string;
+  // Billing
+  base_rate?: number;
+  fuel_surcharge?: number;
+  total_charges?: number;
+  // Notes
+  special_instructions?: string;
+  created_at?: string;
+  updated_at?: string;
+  // Related
+  container?: any;
+  shipment?: Shipment;
+  driver?: Driver;
+}
+
+// Create shipment with containers and auto-generate orders
+export async function createShipmentWithOrders(
+  shipmentData: any,
+  containers: any[],
+  deliveryInfo?: {
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    contactName?: string;
+    contactPhone?: string;
+  }
+): Promise<Shipment | null> {
+  // 1. Create shipment
+  const referenceNumber = `SHP-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+  const { data: shipment, error: shipmentError } = await supabase
+    .from('shipments')
+    .insert({
+      ...shipmentData,
+      reference_number: referenceNumber,
+      status: 'PENDING'
+    })
+    .select()
+    .single();
+
+  if (shipmentError || !shipment) {
+    console.error('Error creating shipment:', shipmentError);
+    return null;
+  }
+
+  // 2. Create containers and orders for each
+  for (const container of containers) {
+    // Create container
+    const { data: containerData, error: containerError } = await supabase
+      .from('containers')
+      .insert({
+        shipment_id: shipment.id,
+        container_number: container.container_number,
+        size: container.size,
+        type: container.type,
+        weight_lbs: container.weight || null,
+        seal_number: container.seal_number || null,
+        is_hazmat: container.is_hazmat || false,
+        hazmat_class: container.hazmat_class || null,
+        un_number: container.hazmat_un || null,
+        is_overweight: container.is_overweight || false,
+        is_reefer: container.is_reefer || false,
+        reefer_temp_setpoint: container.reefer_temp || null,
+        customs_status: container.customs_status || 'PENDING',
+        lifecycle_status: 'BOOKED',
+      })
+      .select()
+      .single();
+
+    if (containerError || !containerData) {
+      console.error('Error creating container:', containerError);
+      continue;
+    }
+
+    // 3. Create orders based on shipment type and trip execution type
+    const tripType = shipmentData.trip_type || 'LIVE_UNLOAD';
+    await createOrdersForContainer(
+      shipment.id,
+      containerData.id,
+      shipmentData.type,
+      tripType,
+      deliveryInfo
+    );
+  }
+
+  return shipment;
+}
+
+// Create orders for a container based on shipment type
+async function createOrdersForContainer(
+  shipmentId: string,
+  containerId: string,
+  shipmentType: 'IMPORT' | 'EXPORT',
+  tripExecutionType: TripExecutionType,
+  deliveryInfo?: {
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    contactName?: string;
+    contactPhone?: string;
+  }
+): Promise<void> {
+  const orderNumber = () => `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+
+  if (shipmentType === 'IMPORT') {
+    // Order 1: Import Delivery (terminal → customer)
+    await supabase.from('orders').insert({
+      order_number: orderNumber(),
+      shipment_id: shipmentId,
+      container_id: containerId,
+      type: 'IMPORT',
+      move_type_v2: 'IMPORT_DELIVERY',
+      trip_execution_type: tripExecutionType,
+      sequence_number: 1,
+      status: 'PENDING',
+      billing_status: 'UNBILLED',
+      delivery_address: deliveryInfo?.address,
+      delivery_city: deliveryInfo?.city,
+      delivery_state: deliveryInfo?.state,
+      delivery_zip: deliveryInfo?.zip,
+      delivery_contact_name: deliveryInfo?.contactName,
+      delivery_contact_phone: deliveryInfo?.contactPhone,
+    });
+
+    // If DROP type, create Order 2: Empty Return
+    if (tripExecutionType === 'DROP' || tripExecutionType === 'DROP_AND_HOOK') {
+      await supabase.from('orders').insert({
+        order_number: orderNumber(),
+        shipment_id: shipmentId,
+        container_id: containerId,
+        type: 'EMPTY_RETURN',
+        move_type_v2: 'EMPTY_RETURN',
+        trip_execution_type: 'DROP',
+        sequence_number: 2,
+        status: 'PENDING',
+        billing_status: 'UNBILLED',
+        // Pickup is where we delivered (customer location)
+        pickup_address: deliveryInfo?.address,
+        pickup_city: deliveryInfo?.city,
+        pickup_state: deliveryInfo?.state,
+        pickup_zip: deliveryInfo?.zip,
+      });
+    }
+  } else if (shipmentType === 'EXPORT') {
+    // Order 1: Empty Pickup (terminal → customer)
+    await supabase.from('orders').insert({
+      order_number: orderNumber(),
+      shipment_id: shipmentId,
+      container_id: containerId,
+      type: 'EXPORT',
+      move_type_v2: 'EMPTY_PICKUP',
+      trip_execution_type: 'DROP',
+      sequence_number: 1,
+      status: 'PENDING',
+      billing_status: 'UNBILLED',
+      delivery_address: deliveryInfo?.address,
+      delivery_city: deliveryInfo?.city,
+      delivery_state: deliveryInfo?.state,
+      delivery_zip: deliveryInfo?.zip,
+    });
+
+    // Order 2: Export Pickup (customer → terminal)
+    await supabase.from('orders').insert({
+      order_number: orderNumber(),
+      shipment_id: shipmentId,
+      container_id: containerId,
+      type: 'EXPORT',
+      move_type_v2: 'EXPORT_PICKUP',
+      trip_execution_type: tripExecutionType,
+      sequence_number: 2,
+      status: 'PENDING',
+      billing_status: 'UNBILLED',
+      pickup_address: deliveryInfo?.address,
+      pickup_city: deliveryInfo?.city,
+      pickup_state: deliveryInfo?.state,
+      pickup_zip: deliveryInfo?.zip,
+    });
+  }
+}
+
+// Get orders for dispatch board (order-centric view)
+export async function getOrdersForDispatch(): Promise<OrderV2[]> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select(`
+      *,
+      container:containers(*),
+      shipment:shipments(*),
+      driver:drivers(*)
+    `)
+    .in('status', ['PENDING', 'READY', 'DISPATCHED', 'IN_PROGRESS'])
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching orders for dispatch:', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Get all orders for a shipment
+export async function getOrdersForShipment(shipmentId: string): Promise<OrderV2[]> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select(`
+      *,
+      container:containers(*),
+      driver:drivers(*)
+    `)
+    .eq('shipment_id', shipmentId)
+    .is('deleted_at', null)
+    .order('sequence_number');
+
+  if (error) {
+    console.error('Error fetching orders:', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Get orders for a container
+export async function getOrdersForContainer(containerId: string): Promise<OrderV2[]> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('container_id', containerId)
+    .is('deleted_at', null)
+    .order('sequence_number');
+
+  if (error) {
+    console.error('Error fetching orders:', error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Update order status
+export async function updateOrderStatus(
+  orderId: string,
+  newStatus: OrderStatus,
+  timestamps?: {
+    dispatched_at?: string;
+    picked_up_at?: string;
+    delivered_at?: string;
+    completed_at?: string;
+  }
+): Promise<boolean> {
+  const updates: any = {
+    status: newStatus,
+    updated_at: new Date().toISOString(),
+    ...timestamps
+  };
+
+  const { error } = await supabase
+    .from('orders')
+    .update(updates)
+    .eq('id', orderId);
+
+  if (error) {
+    console.error('Error updating order status:', error);
+    return false;
+  }
+
+  // Log activity
+  await supabase.from('order_activity_log').insert({
+    order_id: orderId,
+    action: 'STATUS_CHANGE',
+    to_value: newStatus,
+    performed_by: 'SYSTEM',
+    performer_type: 'SYSTEM',
+  });
+
+  return true;
+}
+
+// Assign order to driver
+export async function assignOrderToDriver(
+  orderId: string,
+  driverId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('orders')
+    .update({
+      assigned_driver_id: driverId,
+      status: 'DISPATCHED',
+      dispatched_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', orderId);
+
+  if (error) {
+    console.error('Error assigning order to driver:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// Dispatch order (create trip and assign)
+export async function dispatchOrder(
+  orderId: string,
+  driverId: string,
+  tractorId?: string,
+  chassisNumber?: string,
+  chassisPool?: string
+): Promise<Trip | null> {
+  // Get order details
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .select('*, container:containers(*), shipment:shipments(*)')
+    .eq('id', orderId)
+    .single();
+
+  if (orderError || !order) {
+    console.error('Error fetching order:', orderError);
+    return null;
+  }
+
+  // Create trip
+  const tripNumber = `TRP-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+  const { data: trip, error: tripError } = await supabase
+    .from('trips')
+    .insert({
+      trip_number: tripNumber,
+      type: order.trip_execution_type || 'LIVE_UNLOAD',
+      status: 'DISPATCHED',
+      driver_id: driverId,
+      tractor_id: tractorId || null,
+      chassis_number: chassisNumber || null,
+      primary_order_id: orderId,
+      shipment_id: order.shipment_id,
+      container_id: order.container_id,
+    })
+    .select()
+    .single();
+
+  if (tripError || !trip) {
+    console.error('Error creating trip:', tripError);
+    return null;
+  }
+
+  // Update order
+  await supabase.from('orders').update({
+    assigned_driver_id: driverId,
+    assigned_trip_id: trip.id,
+    status: 'DISPATCHED',
+    dispatched_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('id', orderId);
+
+  // Create trip-order link
+  await supabase.from('trip_orders').insert({
+    trip_id: trip.id,
+    order_id: orderId,
+    sequence: 1,
+    status: 'PENDING',
+  });
+
+  return trip;
+}
+
+// Update container lifecycle status
+export async function updateContainerLifecycle(
+  containerId: string,
+  status: ContainerLifecycleStatus
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('containers')
+    .update({
+      lifecycle_status: status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', containerId);
+
+  return !error;
+}
+
+// Get shipment with full details (containers + orders)
+export async function getShipmentWithDetails(shipmentId: string): Promise<Shipment | null> {
+  const { data, error } = await supabase
+    .from('shipments')
+    .select(`
+      *,
+      containers(
+        *,
+        orders:orders(*)
+      )
+    `)
+    .eq('id', shipmentId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching shipment:', error);
+    return null;
+  }
+
+  return data;
+}
