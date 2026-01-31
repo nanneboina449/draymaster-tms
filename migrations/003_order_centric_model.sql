@@ -262,7 +262,7 @@ SELECT
     s.last_free_day,
     s.port_cutoff,
     o.assigned_driver_id,
-    d.name AS driver_name,
+    CONCAT(d.first_name, ' ', d.last_name) AS driver_name,
     o.assigned_trip_id,
     t.trip_number
 FROM orders o
