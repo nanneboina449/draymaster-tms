@@ -517,7 +517,7 @@ export interface Container {
   created_at?: string;
 }
 
-export async function addContainer(container: any): Promise<Container | null> {
+export async function addContainer(container: any): Promise<Container> {
   const { data, error } = await supabase
     .from('containers')
     .insert({
@@ -534,14 +534,18 @@ export async function addContainer(container: any): Promise<Container | null> {
       is_reefer: container.is_reefer || false,
       reefer_temp_setpoint: container.reefer_temp || null,
       customs_status: container.customs_status || 'PENDING',
+      lifecycle_status: 'BOOKED',
     })
     .select()
     .single();
-  if (error) { console.error('Error:', error); return null; }
+  if (error) {
+    console.error('Error creating container:', error);
+    throw new Error(error.message || 'Failed to create container');
+  }
   return data;
 }
 
-export async function updateContainer(id: string, updates: any): Promise<Container | null> {
+export async function updateContainer(id: string, updates: any): Promise<Container> {
   const { data, error } = await supabase
     .from('containers')
     .update({
@@ -561,7 +565,10 @@ export async function updateContainer(id: string, updates: any): Promise<Contain
     .eq('id', id)
     .select()
     .single();
-  if (error) { console.error('Error:', error); return null; }
+  if (error) {
+    console.error('Error updating container:', error);
+    throw new Error(error.message || 'Failed to update container');
+  }
   return data;
 }
 
@@ -1776,4 +1783,148 @@ export async function getShipmentWithDetails(shipmentId: string): Promise<Shipme
   }
 
   return data;
+}
+
+// ============================================================================
+// WORKFLOW AUTOMATION FUNCTIONS
+// ============================================================================
+
+// Check and auto-advance loads to READY status
+export async function checkAndAutoReadyLoads(): Promise<{ updated: number; errors: string[] }> {
+  const errors: string[] = [];
+  let updated = 0;
+
+  try {
+    // Find PENDING orders where container is ready (customs released, available at terminal)
+    const { data: pendingOrders, error: fetchError } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        order_number,
+        status,
+        container_id,
+        container:containers(
+          customs_status,
+          terminal_available_date,
+          lifecycle_status
+        ),
+        shipment:shipments(
+          last_free_day
+        )
+      `)
+      .eq('status', 'PENDING')
+      .is('deleted_at', null);
+
+    if (fetchError) {
+      errors.push(`Fetch error: ${fetchError.message}`);
+      return { updated, errors };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    for (const order of pendingOrders || []) {
+      const container = order.container as any;
+
+      // Check if ready: customs released AND (available at terminal OR terminal date passed)
+      const customsReleased = container?.customs_status === 'RELEASED';
+      const terminalAvailable = container?.terminal_available_date
+        ? container.terminal_available_date <= today
+        : false;
+
+      if (customsReleased && terminalAvailable) {
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            status: 'READY',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', order.id);
+
+        if (updateError) {
+          errors.push(`Failed to update ${order.order_number}: ${updateError.message}`);
+        } else {
+          updated++;
+
+          // Update container lifecycle to AVAILABLE
+          if (container?.lifecycle_status === 'BOOKED') {
+            await supabase
+              .from('containers')
+              .update({ lifecycle_status: 'AVAILABLE' })
+              .eq('id', order.container_id);
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    errors.push(`Exception: ${err.message}`);
+  }
+
+  return { updated, errors };
+}
+
+// Manual status change for orders (workflow automation)
+export async function updateOrderWorkflowStatus(
+  orderId: string,
+  newStatus: OrderStatus,
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const timestamps: any = { updated_at: new Date().toISOString() };
+
+    // Add relevant timestamp based on status
+    switch (newStatus) {
+      case 'DISPATCHED':
+        timestamps.dispatched_at = new Date().toISOString();
+        break;
+      case 'IN_PROGRESS':
+        timestamps.picked_up_at = new Date().toISOString();
+        break;
+      case 'DELIVERED':
+        timestamps.delivered_at = new Date().toISOString();
+        break;
+      case 'COMPLETED':
+        timestamps.completed_at = new Date().toISOString();
+        break;
+    }
+
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: newStatus, ...timestamps })
+      .eq('id', orderId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Log the activity
+    await supabase.from('order_activity_log').insert({
+      order_id: orderId,
+      action: 'STATUS_CHANGE',
+      to_value: newStatus,
+      details: notes,
+      performed_by: 'DISPATCHER',
+      performer_type: 'USER',
+    });
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// Get available status transitions for a load
+export function getAvailableStatusTransitions(currentStatus: OrderStatus): OrderStatus[] {
+  const transitions: Record<OrderStatus, OrderStatus[]> = {
+    'PENDING': ['READY', 'HOLD', 'CANCELLED'],
+    'READY': ['DISPATCHED', 'PENDING', 'HOLD', 'CANCELLED'],
+    'DISPATCHED': ['IN_PROGRESS', 'READY', 'HOLD'],
+    'IN_PROGRESS': ['DELIVERED', 'DISPATCHED', 'HOLD'],
+    'DELIVERED': ['COMPLETED', 'IN_PROGRESS'],
+    'COMPLETED': [],
+    'HOLD': ['PENDING', 'READY', 'CANCELLED'],
+    'CANCELLED': [],
+    'FAILED': ['PENDING'],
+  };
+
+  return transitions[currentStatus] || [];
 }

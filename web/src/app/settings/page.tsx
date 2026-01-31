@@ -197,6 +197,33 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Workflow */}
+      <div className="bg-white rounded-xl shadow">
+        <div className="px-6 py-4 border-b"><h3 className="font-semibold text-gray-800">Workflow & Automation</h3></div>
+        <div className="p-6">
+          <div className="grid grid-cols-2 gap-4">
+            <a href="/settings/workflow" className="p-4 border rounded-lg hover:border-blue-500 hover:bg-blue-50 transition block">
+              <div className="flex items-center gap-3">
+                <div className="text-3xl">🔄</div>
+                <div>
+                  <p className="font-medium text-gray-900">Dispatch Workflow</p>
+                  <p className="text-sm text-gray-500">View load states, container lifecycle, and automation rules</p>
+                </div>
+              </div>
+            </a>
+            <div className="p-4 border rounded-lg bg-gray-50 opacity-60">
+              <div className="flex items-center gap-3">
+                <div className="text-3xl">🤖</div>
+                <div>
+                  <p className="font-medium text-gray-900">Automation Settings</p>
+                  <p className="text-sm text-gray-500">Configure auto-ready rules and triggers (Coming Soon)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Integrations */}
       <div className="bg-white rounded-xl shadow">
         <div className="px-6 py-4 border-b"><h3 className="font-semibold text-gray-800">Integrations</h3></div>
