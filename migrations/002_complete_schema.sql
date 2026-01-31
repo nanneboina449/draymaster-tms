@@ -1337,6 +1337,28 @@ BEGIN
     END IF;
 
     -- ── orders ────────────────────────────────────────────────────────────
+    -- Columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'container_id') THEN
+        ALTER TABLE orders ADD COLUMN container_id UUID REFERENCES containers(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'shipment_id') THEN
+        ALTER TABLE orders ADD COLUMN shipment_id UUID REFERENCES shipments(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'status') THEN
+        ALTER TABLE orders ADD COLUMN status order_status NOT NULL DEFAULT 'PENDING';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'type') THEN
+        ALTER TABLE orders ADD COLUMN type order_type NOT NULL DEFAULT 'IMPORT';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'billing_status') THEN
+        ALTER TABLE orders ADD COLUMN billing_status billing_status NOT NULL DEFAULT 'UNBILLED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'requested_pickup_date') THEN
+        ALTER TABLE orders ADD COLUMN requested_pickup_date TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'requested_delivery_date') THEN
+        ALTER TABLE orders ADD COLUMN requested_delivery_date TIMESTAMPTZ;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'deleted_at') THEN
         ALTER TABLE orders ADD COLUMN deleted_at TIMESTAMPTZ;
     END IF;
