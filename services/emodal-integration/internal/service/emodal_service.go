@@ -7,6 +7,7 @@ import (
 
 	"github.com/draymaster/services/emodal-integration/internal/client"
 	"github.com/draymaster/services/emodal-integration/internal/domain"
+	"github.com/draymaster/services/emodal-integration/internal/repository"
 	"github.com/draymaster/shared/pkg/kafka"
 	"github.com/draymaster/shared/pkg/logger"
 )
@@ -17,6 +18,7 @@ import (
 //   - Provides query methods for appointment availability and dwell stats
 type EModalService struct {
 	eModalClient  *client.EModalClient
+	repo          *repository.Repository
 	kafkaProducer *kafka.Producer
 	log           *logger.Logger
 }
@@ -24,11 +26,13 @@ type EModalService struct {
 // NewEModalService creates a new EModalService.
 func NewEModalService(
 	eModalClient *client.EModalClient,
+	repo *repository.Repository,
 	kafkaProducer *kafka.Producer,
 	log *logger.Logger,
 ) *EModalService {
 	return &EModalService{
 		eModalClient:  eModalClient,
+		repo:          repo,
 		kafkaProducer: kafkaProducer,
 		log:           log,
 	}
@@ -81,6 +85,11 @@ func (s *EModalService) ProcessContainerEvent(ctx context.Context, event domain.
 		)
 	}
 
+	// Persist status update so GetContainerStatus can serve it
+	if err := s.repo.UpdateContainerStatus(ctx, event.ContainerNumber, event.Status, event.OccurredAt); err != nil {
+		s.log.Errorw("Failed to update container status in DB", "error", err, "container", event.ContainerNumber)
+	}
+
 	return nil
 }
 
@@ -100,6 +109,13 @@ func (s *EModalService) PublishContainers(ctx context.Context, containers []doma
 	published, err := s.eModalClient.PublishContainers(ctx, containers)
 	if err != nil {
 		return nil, err
+	}
+
+	// Persist published containers so GetContainerStatus can track them
+	for _, pc := range containers {
+		if dbErr := s.repo.UpsertPublishedContainer(ctx, pc); dbErr != nil {
+			s.log.Errorw("Failed to persist published container", "error", dbErr, "container", pc.ContainerNumber)
+		}
 	}
 
 	event := kafka.NewEvent("emodal.container.published", "emodal-integration", map[string]interface{}{

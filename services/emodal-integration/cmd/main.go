@@ -15,11 +15,15 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/draymaster/shared/pkg/config"
+	"github.com/draymaster/shared/pkg/database"
 	"github.com/draymaster/shared/pkg/kafka"
 	"github.com/draymaster/shared/pkg/logger"
+	pb "github.com/draymaster/shared/proto/emodal/v1"
 
 	"github.com/draymaster/services/emodal-integration/internal/client"
+	"github.com/draymaster/services/emodal-integration/internal/domain"
 	grpcHandler "github.com/draymaster/services/emodal-integration/internal/grpc"
+	"github.com/draymaster/services/emodal-integration/internal/repository"
 	"github.com/draymaster/services/emodal-integration/internal/service"
 )
 
@@ -49,6 +53,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Database
+	db, err := database.New(ctx, cfg.Database)
+	if err != nil {
+		log.Fatalw("Failed to connect to database", "error", err)
+	}
+	defer db.Close()
+	log.Info("Database connected")
+
+	repo := repository.NewRepository(db.Pool)
+
 	// Kafka producer — publishes internal events for other services
 	kafkaProducer := kafka.NewProducer(cfg.Kafka.Brokers, log)
 	defer kafkaProducer.Close()
@@ -63,7 +77,7 @@ func main() {
 	log.Info("eModal EDS client initialized")
 
 	// Core service — handles event processing and query proxying
-	eModalService := service.NewEModalService(eModalClient, kafkaProducer, log)
+	eModalService := service.NewEModalService(eModalClient, repo, kafkaProducer, log)
 
 	// Container publisher — auto-publishes new containers to eModal when order-service fires container.added
 	containerPublisher := service.NewContainerPublisher(eModalClient, log)
@@ -92,7 +106,9 @@ func main() {
 		}, log)
 
 		go func() {
-			if err := sbConsumer.Start(ctx, eModalService.ProcessContainerEvent); err != nil {
+			if err := sbConsumer.Start(ctx, func(event domain.ContainerStatusEvent) error {
+				return eModalService.ProcessContainerEvent(ctx, event)
+			}); err != nil {
 				if ctx.Err() == nil {
 					log.Fatalw("Service Bus consumer failed", "error", err)
 				}
@@ -104,15 +120,14 @@ func main() {
 	}
 
 	// gRPC server
-	// Note: eModal query RPCs (availability, dwell stats, etc.) will be registered
-	// here once `make proto` is run to generate the gRPC service code from
-	// shared/proto/emodal/v1/emodal.proto
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			grpcHandler.LoggingInterceptor(log),
 			grpcHandler.RecoveryInterceptor(log),
 		),
 	)
+
+	pb.RegisterEModalIntegrationServiceServer(grpcServer, grpcHandler.NewServer(eModalService, repo, log))
 
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)

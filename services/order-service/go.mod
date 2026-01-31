@@ -12,4 +12,4 @@ require (
 	google.golang.org/protobuf v1.32.0
 )
 
-replace github.com/draymaster/shared => ../../shared/pkg
+replace github.com/draymaster/shared => ../../shared

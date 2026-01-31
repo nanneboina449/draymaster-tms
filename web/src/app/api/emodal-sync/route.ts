@@ -224,55 +224,61 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Simulate container status from eModal
-// In production, this would make actual API calls to eModal
+// eModal EDS status_cd → availability mapping
+const STATUS_AVAILABILITY: Record<string, string> = {
+  'Y': 'AVAILABLE',     // In yard / available
+  'A': 'AVAILABLE',     // Available
+  'D': 'DISCHARGED',
+  'R': 'RELEASED',
+  'I': 'IN_YARD',       // Gate in
+  'H': 'NOT_AVAILABLE', // On hold
+  'C': 'NOT_AVAILABLE', // Customs hold
+  'O': 'NOT_AVAILABLE', // Gate out
+  'M': 'NOT_AVAILABLE', // Manifested
+  'L': 'NOT_AVAILABLE', // Loaded
+};
+
 async function syncContainerStatus(
-  container: any, 
+  container: any,
   config: any
 ): Promise<ContainerUpdateResult> {
   try {
-    // In production, this would be:
-    // const response = await fetch(`${EMODAL_PROPASS_API}/container/${container.container_number}`, {
-    //   headers: { 'Authorization': `Bearer ${config.api_key}` }
-    // });
-    // const data = await response.json();
+    const apiKey = config?.api_key_encrypted || '';
+    const url = `${EMODAL_PROPASS_API}/container/${container.container_number}`;
 
-    // For demo, simulate realistic container status
-    const statuses = ['AVAILABLE', 'NOT_AVAILABLE', 'IN_YARD', 'DISCHARGED'];
-    const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-    
-    // Simulate holds (20% chance of customs hold, 10% freight hold)
-    const hasCustomsHold = Math.random() < 0.2;
-    const hasFreightHold = Math.random() < 0.1;
-    
-    // If has holds, mark as NOT_AVAILABLE
-    const finalStatus = (hasCustomsHold || hasFreightHold) ? 'NOT_AVAILABLE' : randomStatus;
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+    });
 
-    // Generate LFD (between 0-7 days from now for demo)
-    const lfdDays = Math.floor(Math.random() * 8);
-    const lfdDate = new Date();
-    lfdDate.setDate(lfdDate.getDate() + lfdDays);
+    if (!response.ok) {
+      return {
+        container_number: container.container_number,
+        success: false,
+        error: `eModal API returned ${response.status}`,
+      };
+    }
 
-    const simulatedData = {
-      emodal_status: finalStatus === 'AVAILABLE' ? 'AVAILABLE FOR PICKUP' : 
-                     finalStatus === 'IN_YARD' ? 'CONTAINER IN YARD' : 'PENDING RELEASE',
-      availability_status: finalStatus,
-      has_customs_hold: hasCustomsHold,
-      has_freight_hold: hasFreightHold,
-      has_usda_hold: false,
-      has_tmf_hold: false,
-      last_free_day: lfdDate.toISOString().split('T')[0],
-      demurrage_amount: lfdDays < 0 ? Math.abs(lfdDays) * 150 : 0, // $150/day demurrage
-      yard_location: `YARD-${String.fromCharCode(65 + Math.floor(Math.random() * 6))}-${Math.floor(Math.random() * 50) + 1}`,
-      gate_status: finalStatus === 'AVAILABLE' ? 'READY' : 'NOT_READY',
-    };
+    const data = await response.json();
+    const statusCd: string = data.unitstatusinfo?.status_cd || '';
 
     return {
       container_number: container.container_number,
       success: true,
-      data: simulatedData,
+      data: {
+        emodal_status:        data.unitstatusinfo?.status_desc || statusCd,
+        availability_status: STATUS_AVAILABILITY[statusCd] || 'UNKNOWN',
+        has_customs_hold:     data.holds?.customs || false,
+        has_freight_hold:     data.holds?.freight || false,
+        has_usda_hold:        data.holds?.usda    || false,
+        last_free_day:        data.last_free_day  || null,
+        yard_location:        data.yard_location  || '',
+        terminal_name:        data.currentlocationinfo?.facility || container.terminal_name,
+        gate_status:          STATUS_AVAILABILITY[statusCd] === 'AVAILABLE' ? 'READY' : 'NOT_READY',
+      },
     };
-
   } catch (error: any) {
     return {
       container_number: container.container_number,

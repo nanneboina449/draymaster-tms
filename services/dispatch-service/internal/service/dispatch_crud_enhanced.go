@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/draymaster/services/dispatch-service/internal/domain"
 	"github.com/draymaster/services/dispatch-service/internal/repository"
@@ -195,7 +195,7 @@ func (s *DispatchCRUDService) DeleteTrip(ctx context.Context, tripID uuid.UUID, 
 	}
 
 	// Execute in transaction
-	err = s.db.Transaction(ctx, func(tx pgxpool.Tx) error {
+	err = s.db.Transaction(ctx, func(tx pgx.Tx) error {
 		// Delete stops
 		if err := s.stopRepo.DeleteByTripID(ctx, tripID); err != nil {
 			return apperrors.DatabaseError("delete stops", err)
@@ -578,7 +578,7 @@ func (s *DispatchCRUDService) BulkAssignDriver(ctx context.Context, tripIDs []uu
 	}
 
 	// Execute in transaction
-	err = s.db.Transaction(ctx, func(tx pgxpool.Tx) error {
+	err = s.db.Transaction(ctx, func(tx pgx.Tx) error {
 		for _, tripID := range tripIDs {
 			trip, err := s.tripRepo.GetByID(ctx, tripID)
 			if err != nil {

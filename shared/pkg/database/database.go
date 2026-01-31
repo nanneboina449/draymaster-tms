@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/draymaster/shared/pkg/config"
@@ -60,7 +61,7 @@ func (db *DB) Ping(ctx context.Context) error {
 }
 
 // Transaction executes a function within a database transaction
-func (db *DB) Transaction(ctx context.Context, fn func(tx pgxpool.Tx) error) error {
+func (db *DB) Transaction(ctx context.Context, fn func(tx pgx.Tx) error) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

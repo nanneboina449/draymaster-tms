@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/draymaster/services/dispatch-service/internal/domain"
 	"github.com/draymaster/services/dispatch-service/internal/repository"
@@ -78,7 +78,7 @@ func (s *EnhancedDispatchService) CreateTripEnhanced(ctx context.Context, input 
 	var trip *domain.Trip
 
 	// Execute in transaction
-	err := s.db.Transaction(ctx, func(tx pgxpool.Tx) error {
+	err := s.db.Transaction(ctx, func(tx pgx.Tx) error {
 		// Load location details for all stops
 		locations, err := s.loadStopLocations(ctx, input.Stops)
 		if err != nil {
@@ -168,7 +168,7 @@ func (s *EnhancedDispatchService) CreateTripEnhanced(ctx context.Context, input 
 }
 
 // validateDriverAvailability checks if driver can accept the trip
-func (s *EnhancedDispatchService) validateDriverAvailability(ctx context.Context, driverID uuid.UUID, startTime *time.Time) error {
+func (s *EnhancedDispatchService) validateDriverAvailability(ctx context.Context, driverID uuid.UUID, _ *time.Time) error {
 	driver, err := s.driverRepo.GetByID(ctx, driverID)
 	if err != nil {
 		return apperrors.NotFoundError("driver", driverID.String())
@@ -205,7 +205,7 @@ func (s *EnhancedDispatchService) loadStopLocations(ctx context.Context, stops [
 }
 
 // calculateRealTripMetrics calculates actual distance and duration
-func (s *EnhancedDispatchService) calculateRealTripMetrics(ctx context.Context, locations map[uuid.UUID]*domain.Location, stops []CreateStopInput) (float64, int, error) {
+func (s *EnhancedDispatchService) calculateRealTripMetrics(_ context.Context, locations map[uuid.UUID]*domain.Location, stops []CreateStopInput) (float64, int, error) {
 	var totalMiles float64
 	var totalDuration int
 
@@ -381,7 +381,7 @@ func (s *EnhancedDispatchService) AssignDriverEnhanced(ctx context.Context, trip
 }
 
 // FindStreetTurnOpportunitiesEnhanced finds street turn matches with improved scoring
-func (s *EnhancedDispatchService) FindStreetTurnOpportunitiesEnhanced(ctx context.Context, filter StreetTurnFilter) ([]domain.StreetTurnOpportunity, error) {
+func (s *EnhancedDispatchService) FindStreetTurnOpportunitiesEnhanced(ctx context.Context, filter repository.StreetTurnFilter) ([]domain.StreetTurnOpportunity, error) {
 	opportunities, err := s.tripRepo.FindStreetTurnMatches(ctx, filter)
 	if err != nil {
 		return nil, apperrors.DatabaseError("find street turn opportunities", err)
