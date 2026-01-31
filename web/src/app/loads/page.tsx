@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabase';
+import { supabase, checkAndAutoReadyLoads, updateLoadStatus, getAvailableStatusTransitions, OrderStatus } from '../../lib/supabase';
 
 interface LoadItem {
   id: string;
@@ -93,6 +93,8 @@ export default function LoadsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLoad, setSelectedLoad] = useState<LoadItem | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [autoReadyLoading, setAutoReadyLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     fetchLoads();
@@ -215,6 +217,48 @@ export default function LoadsPage() {
     router.push(`/dispatch?order=${load.order_id}`);
   };
 
+  const handleAutoReady = async () => {
+    try {
+      setAutoReadyLoading(true);
+      setStatusMessage(null);
+      const result = await checkAndAutoReadyLoads();
+      if (result.updated > 0) {
+        setStatusMessage({ type: 'success', text: `${result.updated} load(s) moved to READY status` });
+        fetchLoads();
+      } else {
+        setStatusMessage({ type: 'success', text: 'No loads eligible for auto-ready' });
+      }
+      if (result.errors.length > 0) {
+        setStatusMessage({ type: 'error', text: result.errors.join(', ') });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message });
+    } finally {
+      setAutoReadyLoading(false);
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
+  const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
+    try {
+      setStatusMessage(null);
+      const result = await updateLoadStatus(orderId, newStatus);
+      if (result.success) {
+        setStatusMessage({ type: 'success', text: `Status updated to ${newStatus}` });
+        // Update local state
+        setLoads(prev => prev.map(l =>
+          l.id === orderId ? { ...l, order_status: newStatus } : l
+        ));
+      } else {
+        setStatusMessage({ type: 'error', text: result.error || 'Failed to update status' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message });
+    } finally {
+      setTimeout(() => setStatusMessage(null), 5000);
+    }
+  };
+
   const filteredLoads = loads.filter(l => {
     if (statusFilter && l.order_status !== statusFilter) return false;
     if (typeFilter && l.shipment_type !== typeFilter) return false;
@@ -233,6 +277,7 @@ export default function LoadsPage() {
   const stats = {
     total: loads.length,
     pending: loads.filter(l => l.order_status === 'PENDING').length,
+    ready: loads.filter(l => l.order_status === 'READY').length,
     dispatched: loads.filter(l => l.order_status === 'DISPATCHED').length,
     inProgress: loads.filter(l => l.order_status === 'IN_PROGRESS').length,
     completed: loads.filter(l => l.order_status === 'COMPLETED').length,
@@ -256,8 +301,15 @@ export default function LoadsPage() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">Error: {error}</div>}
 
+      {/* Status Message */}
+      {statusMessage && (
+        <div className={`px-4 py-3 rounded-lg ${statusMessage.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+          {statusMessage.text}
+        </div>
+      )}
+
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <div className="bg-white rounded-xl shadow p-4">
           <p className="text-sm text-gray-500">Total Loads</p>
           <p className="text-2xl font-bold">{stats.total}</p>
@@ -265,6 +317,10 @@ export default function LoadsPage() {
         <div className="bg-white rounded-xl shadow p-4">
           <p className="text-sm text-gray-500">Pending</p>
           <p className="text-2xl font-bold text-gray-600">{stats.pending}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow p-4">
+          <p className="text-sm text-gray-500">Ready</p>
+          <p className="text-2xl font-bold text-cyan-600">{stats.ready}</p>
         </div>
         <div className="bg-white rounded-xl shadow p-4">
           <p className="text-sm text-gray-500">Dispatched</p>
@@ -313,6 +369,26 @@ export default function LoadsPage() {
         <button onClick={fetchLoads} className="px-4 py-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm">
           Refresh
         </button>
+        <button
+          onClick={handleAutoReady}
+          disabled={autoReadyLoading}
+          className="px-4 py-1.5 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 text-sm disabled:opacity-50 flex items-center gap-2"
+        >
+          {autoReadyLoading ? (
+            <>
+              <span className="animate-spin">&#9696;</span>
+              Checking...
+            </>
+          ) : (
+            'Auto-Ready'
+          )}
+        </button>
+        <a
+          href="/settings/workflow"
+          className="px-4 py-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm text-gray-700"
+        >
+          Workflow Rules
+        </a>
       </div>
 
       {/* Loads Table */}
@@ -405,9 +481,19 @@ export default function LoadsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(load.order_status)}`}>
-                          {load.order_status}
-                        </span>
+                        <select
+                          value={load.order_status}
+                          onChange={(e) => handleStatusChange(load.id, e.target.value as OrderStatus)}
+                          className={`px-2 py-0.5 rounded text-xs font-medium border-0 cursor-pointer ${getStatusColor(load.order_status)}`}
+                        >
+                          <option value={load.order_status}>{load.order_status}</option>
+                          {getAvailableStatusTransitions(load.order_status as OrderStatus)
+                            .filter(s => s !== load.order_status)
+                            .map(status => (
+                              <option key={status} value={status}>{status}</option>
+                            ))
+                          }
+                        </select>
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {load.driver_name || <span className="text-gray-400">-</span>}
@@ -420,7 +506,7 @@ export default function LoadsPage() {
                           >
                             View
                           </button>
-                          {load.order_status === 'PENDING' && (
+                          {(load.order_status === 'PENDING' || load.order_status === 'READY') && (
                             <button
                               onClick={() => handleDispatch(load)}
                               className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -524,7 +610,7 @@ export default function LoadsPage() {
                 >
                   Close
                 </button>
-                {selectedLoad.order_status === 'PENDING' && (
+                {(selectedLoad.order_status === 'PENDING' || selectedLoad.order_status === 'READY') && (
                   <button
                     onClick={() => { setShowDetailModal(false); handleDispatch(selectedLoad); }}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
