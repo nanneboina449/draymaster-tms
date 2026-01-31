@@ -1862,8 +1862,8 @@ export async function checkAndAutoReadyLoads(): Promise<{ updated: number; error
   return { updated, errors };
 }
 
-// Manual status change for loads
-export async function updateLoadStatus(
+// Manual status change for orders (workflow automation)
+export async function updateOrderWorkflowStatus(
   orderId: string,
   newStatus: OrderStatus,
   notes?: string

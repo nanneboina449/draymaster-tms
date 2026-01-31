@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase, checkAndAutoReadyLoads, updateLoadStatus, getAvailableStatusTransitions, OrderStatus } from '../../lib/supabase';
+import { supabase, checkAndAutoReadyLoads, updateOrderWorkflowStatus, getAvailableStatusTransitions, OrderStatus } from '../../lib/supabase';
 
 interface LoadItem {
   id: string;
@@ -242,7 +242,7 @@ export default function LoadsPage() {
   const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
     try {
       setStatusMessage(null);
-      const result = await updateLoadStatus(orderId, newStatus);
+      const result = await updateOrderWorkflowStatus(orderId, newStatus);
       if (result.success) {
         setStatusMessage({ type: 'success', text: `Status updated to ${newStatus}` });
         // Update local state
