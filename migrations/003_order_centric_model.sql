@@ -235,6 +235,11 @@ CREATE INDEX IF NOT EXISTS idx_containers_lifecycle ON containers(lifecycle_stat
 -- 10. CREATE VIEWS
 -- ==============================================================================
 
+-- Drop existing views first to allow column name changes
+DROP VIEW IF EXISTS v_dispatch_board CASCADE;
+DROP VIEW IF EXISTS v_shipment_summary CASCADE;
+DROP VIEW IF EXISTS v_container_tracking CASCADE;
+
 -- Dispatch board view: shows orders ready for dispatch
 CREATE OR REPLACE VIEW v_dispatch_board AS
 SELECT
