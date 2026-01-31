@@ -5,8 +5,8 @@ import {
   Load, LoadCharge, LoadNote, LoadActivityLog, Driver, Equipment,
   LoadStatus, MoveType, ChargeType, LOAD_STATUS_LABELS, TERMINAL_LABELS, SHIPPING_LINE_LABELS
 } from '@/lib/types';
-import { 
-  getLoadDetails, updateLoad, updateLoadStatus, addLoadNote, 
+import {
+  getLoadDetails, getShipmentAsLoad, updateLoad, updateLoadStatus, addLoadNote,
   addLoadCharge, autoCalculateCharges, createTrip, generateInvoiceFromLoad,
   getAvailableDrivers, logLoadActivity
 } from '@/lib/supabase';
@@ -51,12 +51,14 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
 
   const loadData = async () => {
     setLoading(true);
-    const data = await getLoadDetails(loadId);
-    setLoad(data);
+    const data = loadId.startsWith('shp:')
+      ? await getShipmentAsLoad(loadId.slice(4))
+      : await getLoadDetails(loadId);
+    setLoad(data as any);
     if (data) {
       setDispatchForm(prev => ({
         ...prev,
-        move_type: data.move_type || 'LIVE',
+        move_type: (data.move_type || 'LIVE') as MoveType,
       }));
     }
     setLoading(false);
@@ -64,14 +66,13 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
 
   const loadResources = async () => {
     const drivers = await getAvailableDrivers();
-    setAvailableDrivers(drivers);
+    setAvailableDrivers(drivers as any);
 
-    const { data: equipment } = await supabase
-      .from('equipment')
+    const { data: tractorData } = await supabase
+      .from('tractors')
       .select('*')
-      .eq('equipment_type', 'TRACTOR')
-      .eq('status', 'ACTIVE');
-    setTractors(equipment || []);
+      .in('status', ['AVAILABLE', 'ACTIVE']);
+    setTractors((tractorData || []) as Equipment[]);
   };
 
   // Status actions
@@ -171,6 +172,7 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
     );
 
     if (trip) {
+      await updateLoadStatus(loadId as any, 'DISPATCHED' as any);
       loadData();
       onUpdate();
     }

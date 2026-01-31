@@ -67,7 +67,7 @@ export default function DispatchBoard() {
   const loadData = async () => {
     setLoading(true);
     const data = await getDispatchBoard();
-    setLoads(data);
+    setLoads(data as any);
     setLoading(false);
   };
 

@@ -315,9 +315,72 @@ export async function getTrips(): Promise<Trip[]> {
   return data || [];
 }
 
-export async function createTrip(trip: Partial<Trip>): Promise<Trip | null> {
-  const { data, error } = await supabase.from('trips').insert(trip).select().single();
-  if (error) { console.error('Error:', error); return null; }
+export async function createTrip(
+  loadIdOrTrip: string | Partial<Trip>,
+  driver_id?: string,
+  tractor_id?: string,
+  chassis_number?: string,
+  chassis_pool?: string,
+  move_type?: string,
+  legs?: any[]
+): Promise<Trip | null> {
+  // Map frontend MoveType labels to DB trip_type enum values
+  const tripTypeMap: Record<string, string> = {
+    'LIVE': 'LIVE_LOAD',
+    'DROP': 'DROP_ONLY',
+    'PREPULL': 'PRE_PULL',
+    'STREET_TURN': 'STREET_TURN',
+  };
+
+  const tripNumber = `TRP-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+  let tripRecord: any;
+  let tripLegs: any[] = [];
+
+  if (typeof loadIdOrTrip === 'string') {
+    // Positional-arg signature used by LoadDetailPanel
+    const isShipment = loadIdOrTrip.startsWith('shp:');
+
+    tripRecord = {
+      trip_number: tripNumber,
+      type: tripTypeMap[move_type || 'LIVE'] || 'LIVE_LOAD',
+      status: 'DISPATCHED',
+      driver_id: driver_id || null,
+      tractor_id: tractor_id || null,
+      chassis_number: chassis_number || null,
+    };
+
+    if (isShipment) {
+      const containerId = loadIdOrTrip.slice(4);
+      const { data: containerRow } = await supabase
+        .from('containers').select('shipment_id').eq('id', containerId).single();
+      if (containerRow) {
+        tripRecord.shipment_id = containerRow.shipment_id;
+        tripRecord.container_id = containerId;
+      }
+    } else {
+      tripRecord.load_id = loadIdOrTrip;
+    }
+
+    tripLegs = legs || [];
+  } else {
+    // Single-object signature (backward compat)
+    tripRecord = { trip_number: tripNumber, ...loadIdOrTrip };
+  }
+
+  const { data, error } = await supabase
+    .from('trips').insert(tripRecord).select().single();
+  if (error) { console.error('Error creating trip:', error); return null; }
+
+  // Insert legs into trip_legs
+  for (let i = 0; i < tripLegs.length; i++) {
+    await supabase.from('trip_legs').insert({
+      ...tripLegs[i],
+      trip_id: data.id,
+      leg_number: i + 1,
+      status: 'PENDING',
+    });
+  }
+
   return data;
 }
 
@@ -520,7 +583,7 @@ export type MoveType = 'LIVE' | 'DROP' | 'PREPULL' | 'STREET_TURN' | 'RETURN_EMP
 export type ContainerSize = '20' | '40' | '40HC' | '45';
 export type TerminalStatus = 'ON_VESSEL' | 'DISCHARGED' | 'AVAILABLE' | 'PICKED_UP' | 'RETURNED';
 export type LoadStatus = 'TRACKING' | 'AVAILABLE' | 'HOLD' | 'APPOINTMENT_NEEDED' | 'READY_FOR_DISPATCH' | 'DISPATCHED' | 'IN_YARD' | 'IN_TRANSIT' | 'AT_PICKUP' | 'AT_DELIVERY' | 'RETURNING' | 'COMPLETED' | 'INVOICED' | 'CANCELLED';
-export type ChargeType = 'LINE_HAUL' | 'FUEL_SURCHARGE' | 'PREPULL' | 'DETENTION' | 'STORAGE' | 'CHASSIS_SPLIT' | 'DEMURRAGE' | 'GATE_FEE' | 'HAZMAT' | 'OVERWEIGHT' | 'TRIAXLE' | 'WAITING_TIME' | 'STOP_OFF' | 'OTHER';
+export type ChargeType = 'LINE_HAUL' | 'FUEL_SURCHARGE' | 'PREPULL' | 'DETENTION' | 'STORAGE' | 'CHASSIS_SPLIT' | 'CHASSIS_RENTAL' | 'DEMURRAGE' | 'GATE_FEE' | 'HAZMAT' | 'OVERWEIGHT' | 'TRIAXLE' | 'WAITING_TIME' | 'STOP_OFF' | 'OTHER';
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface Load {
@@ -607,6 +670,7 @@ export interface DispatchBoardItem {
   hold_freight?: boolean;
   hold_usda?: boolean;
   hold_tmf?: boolean;
+  has_holds?: boolean;
   in_yard?: boolean;
   customer_name?: string;
   delivery_city?: string;
@@ -651,37 +715,118 @@ export async function getDispatchBoard(): Promise<DispatchBoardItem[]> {
   return data || [];
 }
 
-// Fallback function if view doesn't exist
+// Compute LFD urgency relative to today
+function computeLFDUrgency(lfd: string | null): { lfd_urgency: string; days_until_lfd: number } {
+  if (!lfd) return { lfd_urgency: 'OK', days_until_lfd: 999 };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const lfdDate = new Date(lfd); lfdDate.setHours(0, 0, 0, 0);
+  const diff = Math.ceil((lfdDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diff < 0) return { lfd_urgency: 'OVERDUE', days_until_lfd: diff };
+  if (diff === 0) return { lfd_urgency: 'TOMORROW', days_until_lfd: 0 };
+  if (diff <= 3) return { lfd_urgency: 'SOON', days_until_lfd: diff };
+  return { lfd_urgency: 'OK', days_until_lfd: diff };
+}
+
+// Map shipment_status enum → LoadStatus for the dispatch board
+function mapShipmentStatusToLoadStatus(status: string | null): LoadStatus {
+  const map: Record<string, LoadStatus> = {
+    'PENDING': 'TRACKING',
+    'CONFIRMED': 'AVAILABLE',
+    'IN_PROGRESS': 'DISPATCHED',
+    'DELIVERED': 'COMPLETED',
+    'COMPLETED': 'COMPLETED',
+    'CANCELLED': 'CANCELLED',
+  };
+  return map[status || ''] || 'TRACKING';
+}
+
+// Map LoadStatus back → shipment_status enum for updates
+function mapLoadStatusToShipmentStatus(status: string): string {
+  const map: Record<string, string> = {
+    'TRACKING': 'PENDING',
+    'AVAILABLE': 'CONFIRMED',
+    'HOLD': 'PENDING',
+    'APPOINTMENT_NEEDED': 'PENDING',
+    'READY_FOR_DISPATCH': 'CONFIRMED',
+    'DISPATCHED': 'IN_PROGRESS',
+    'IN_TRANSIT': 'IN_PROGRESS',
+    'AT_PICKUP': 'IN_PROGRESS',
+    'AT_DELIVERY': 'IN_PROGRESS',
+    'RETURNING': 'IN_PROGRESS',
+    'IN_YARD': 'IN_PROGRESS',
+    'COMPLETED': 'DELIVERED',
+    'INVOICED': 'COMPLETED',
+    'CANCELLED': 'CANCELLED',
+  };
+  return map[status] || 'IN_PROGRESS';
+}
+
+// Fetches from both loads and shipments tables and merges into one board
 async function getLoadsForDispatch(): Promise<DispatchBoardItem[]> {
-  const { data, error } = await supabase
+  // 1. Loads table (created via dispatch page OrderEntryForm)
+  const { data: loadsData } = await supabase
     .from('loads')
-    .select(`
-      *,
-      customer:customers(company_name),
-      order:orders(location_city)
-    `)
+    .select(`*, customer:customers(company_name), order:orders(location_city)`)
     .order('last_free_day', { ascending: true, nullsFirst: false });
-  
-  if (error) { console.error('Error:', error); return []; }
-  
-  return (data || []).map(load => ({
-    id: load.id,
-    load_number: load.load_number,
-    container_number: load.container_number,
-    container_size: load.container_size,
-    status: load.status,
-    terminal_status: load.terminal_status,
-    terminal: load.terminal,
-    last_free_day: load.last_free_day,
-    move_type: load.move_type,
-    hold_customs: load.hold_customs,
-    hold_freight: load.hold_freight,
-    hold_usda: load.hold_usda,
-    hold_tmf: load.hold_tmf,
-    in_yard: load.in_yard,
-    customer_name: load.customer?.company_name,
-    delivery_city: load.order?.location_city,
-  }));
+
+  const loadItems: DispatchBoardItem[] = (loadsData || []).map((load: any) => {
+    const urgency = computeLFDUrgency(load.last_free_day);
+    return {
+      id: load.id,
+      load_number: load.load_number,
+      container_number: load.container_number,
+      container_size: load.container_size,
+      status: load.status,
+      terminal_status: load.terminal_status,
+      terminal: load.terminal,
+      last_free_day: load.last_free_day,
+      move_type: load.move_type,
+      hold_customs: load.hold_customs,
+      hold_freight: load.hold_freight,
+      hold_usda: load.hold_usda,
+      hold_tmf: load.hold_tmf,
+      in_yard: load.in_yard,
+      customer_name: load.customer?.company_name,
+      delivery_city: load.order?.location_city,
+      lfd_urgency: urgency.lfd_urgency,
+      days_until_lfd: urgency.days_until_lfd,
+    };
+  });
+
+  // 2. Shipments + containers (created via Loads page NewLoadModal wizard)
+  const { data: shipmentsData } = await supabase
+    .from('shipments')
+    .select(`*, containers(*)`)
+    .order('created_at', { ascending: false });
+
+  const shipmentItems: DispatchBoardItem[] = [];
+  for (const shipment of (shipmentsData || [])) {
+    for (const container of (shipment.containers || [])) {
+      const urgency = computeLFDUrgency(shipment.last_free_day);
+      shipmentItems.push({
+        id: `shp:${container.id}`,
+        load_number: shipment.reference_number || shipment.id,
+        container_number: container.container_number,
+        container_size: container.size,
+        status: mapShipmentStatusToLoadStatus(shipment.status),
+        terminal_status: 'AVAILABLE',
+        terminal: shipment.terminal_name,
+        last_free_day: shipment.last_free_day,
+        move_type: shipment.trip_type || 'LIVE',
+        hold_customs: container.customs_status === 'HOLD',
+        hold_freight: false,
+        hold_usda: false,
+        hold_tmf: false,
+        in_yard: false,
+        customer_name: shipment.customer_name,
+        delivery_city: shipment.delivery_city,
+        lfd_urgency: urgency.lfd_urgency,
+        days_until_lfd: urgency.days_until_lfd,
+      });
+    }
+  }
+
+  return [...loadItems, ...shipmentItems];
 }
 
 // LOADS
@@ -738,13 +883,25 @@ export async function updateLoadStatus(
   newStatus: LoadStatus,
   performedBy: string = 'SYSTEM'
 ): Promise<boolean> {
+  // Shipment-sourced loads: update the parent shipment's status
+  if (loadId.startsWith('shp:')) {
+    const containerId = loadId.slice(4);
+    const { data: containerRow } = await supabase
+      .from('containers').select('shipment_id').eq('id', containerId).single();
+    if (!containerRow) return false;
+    const shipmentStatus = mapLoadStatusToShipmentStatus(newStatus);
+    const { error } = await supabase
+      .from('shipments').update({ status: shipmentStatus }).eq('id', containerRow.shipment_id);
+    return !error;
+  }
+
+  // Loads-table sourced items: update loads.status directly
   const { error } = await supabase
     .from('loads')
     .update({ status: newStatus, updated_at: new Date().toISOString() })
     .eq('id', loadId);
   if (error) { console.error('Error:', error); return false; }
-  
-  // Log activity
+
   await logLoadActivity(loadId, 'STATUS_CHANGE', null, newStatus, undefined, performedBy);
   return true;
 }
@@ -994,14 +1151,89 @@ export async function getAvailableDrivers(): Promise<Driver[]> {
     .from('trips')
     .select('driver_id')
     .in('status', ['DISPATCHED', 'EN_ROUTE', 'AT_PICKUP', 'AT_DELIVERY']);
-  
-  const busyIds = busyDriverIds?.map(t => t.driver_id).filter(Boolean) || [];
-  
-  let query = supabase.from('drivers').select('*').eq('status', 'ACTIVE');
+
+  const busyIds = busyDriverIds?.map((t: any) => t.driver_id).filter(Boolean) || [];
+
+  let query = supabase.from('drivers').select('*').in('status', ['ACTIVE', 'AVAILABLE']);
   if (busyIds.length > 0) {
-    query = query.not('id', 'in', `(${busyIds.join(',')})`);
+    query = query.not('id', 'in', busyIds);
   }
-  
+
   const { data } = await query;
-  return data || [];
+  // Compute name from first_name + last_name (DB columns) so the dispatch
+  // form dropdown can render driver.name
+  return (data || []).map((d: any) => ({
+    ...d,
+    name: `${d.first_name || ''} ${d.last_name || ''}`.trim(),
+  }));
+}
+
+// Fetch a single container + parent shipment and return as a Load-compatible
+// object so LoadDetailPanel can render it without changes.
+export async function getShipmentAsLoad(containerId: string): Promise<Load | null> {
+  const { data, error } = await supabase
+    .from('containers')
+    .select('*, shipment:shipments(*)')
+    .eq('id', containerId)
+    .single();
+  if (error || !data) return null;
+
+  const shipment = (data as any).shipment;
+
+  // Check for an existing trip dispatched for this container
+  const { data: trip } = await supabase
+    .from('trips')
+    .select('*, driver:drivers(*), tractor:tractors(*), legs:trip_legs(*)')
+    .eq('container_id', containerId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  return {
+    id: `shp:${containerId}`,
+    load_number: shipment?.reference_number || '',
+    container_number: (data as any).container_number,
+    container_size: (data as any).size,
+    container_type: (data as any).type || 'DRY',
+    weight_lbs: (data as any).weight_lbs,
+    seal_number: (data as any).seal_number,
+    is_hazmat: (data as any).is_hazmat || false,
+    hazmat_class: (data as any).hazmat_class,
+    is_overweight: (data as any).is_overweight || false,
+    requires_triaxle: (data as any).is_overweight || false,
+    move_type: shipment?.trip_type || 'LIVE',
+    terminal: shipment?.terminal_name,
+    terminal_status: 'AVAILABLE',
+    last_free_day: shipment?.last_free_day,
+    hold_customs: (data as any).customs_status === 'HOLD',
+    hold_freight: false,
+    hold_usda: false,
+    hold_tmf: false,
+    hold_other: false,
+    gate_fee_paid: false,
+    on_chassis: false,
+    in_yard: false,
+    status: mapShipmentStatusToLoadStatus(shipment?.status),
+    total_charges: 0,
+    customer_id: shipment?.customer_id || '',
+    customer: shipment?.customer_name
+      ? { id: shipment.customer_id || '', company_name: shipment.customer_name } as any
+      : undefined,
+    order: {
+      location_name: shipment?.delivery_city
+        ? `${shipment.delivery_city}, ${shipment.delivery_state || ''}`
+        : 'Customer Location',
+      location_address: shipment?.delivery_address,
+      location_city: shipment?.delivery_city,
+      location_state: shipment?.delivery_state,
+    } as any,
+    trip: trip || undefined,
+    created_at: shipment?.created_at || '',
+    updated_at: shipment?.created_at || '',
+  } as unknown as Load;
+}
+
+// Stub — rate-based auto-calculation is not yet implemented.
+export async function autoCalculateCharges(loadId: string): Promise<void> {
+  console.log('autoCalculateCharges: not yet implemented for', loadId);
 }
