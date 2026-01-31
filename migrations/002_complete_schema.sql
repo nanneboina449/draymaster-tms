@@ -1295,6 +1295,14 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 DO $$
 BEGIN
+    -- ── customers ─────────────────────────────────────────────────────────
+    -- Migration 003 renamed customers.name → company_name.  On a pre-existing
+    -- DB the old column name may still be in place; rename it before the seed
+    -- INSERT that references company_name.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'name') THEN
+        ALTER TABLE customers RENAME COLUMN name TO company_name;
+    END IF;
+
     -- ── shipments ─────────────────────────────────────────────────────────
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'terminal_id') THEN
         ALTER TABLE shipments ADD COLUMN terminal_id UUID REFERENCES locations(id);
