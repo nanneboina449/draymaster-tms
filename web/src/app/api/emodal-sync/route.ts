@@ -9,7 +9,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// eModal API endpoints (these are placeholder URLs - real implementation would use actual eModal API)
 const EMODAL_DATA_API = 'https://apidocs.eds.emodal.com';
 const EMODAL_PROPASS_API = 'https://propassapi.emodal.com/api';
 
@@ -85,7 +84,6 @@ export async function POST(request: NextRequest) {
       .limit(50);
 
     if (containersToSync && containersToSync.length > 0) {
-      // Simulate eModal API call (in production, this would be real API calls)
       for (const container of containersToSync) {
         try {
           const result = await syncContainerStatus(container, config);
@@ -243,7 +241,7 @@ async function syncContainerStatus(
   config: any
 ): Promise<ContainerUpdateResult> {
   try {
-    const apiKey = config?.api_key_encrypted || '';
+    const apiKey = config?.api_key || '';
     const url = `${EMODAL_PROPASS_API}/container/${container.container_number}`;
 
     const response = await fetch(url, {
