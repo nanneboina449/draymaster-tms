@@ -18,7 +18,10 @@
       "Bash(npx next build)",
       "Bash(npm run build:*)",
       "Bash(npm test:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(git push:*)"
     ]
   }
 }
