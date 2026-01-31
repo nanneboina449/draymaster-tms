@@ -6,17 +6,17 @@ import Link from 'next/link';
 
 interface ShipmentDetail {
   id: string;
-  load_number: string;
+  reference_number: string;
   customer_name: string;
   container_number: string;
   container_size: string;
   container_type: string;
-  move_type: string;
   terminal: string;
   status: string;
   last_free_day: string | null;
   is_hazmat: boolean;
   is_overweight: boolean;
+  customs_status: string;
   emodal_status: string | null;
   availability_status: string | null;
   has_customs_hold: boolean;
@@ -48,61 +48,60 @@ export default function ShipmentsPage() {
     try {
       setLoading(true);
 
-      const [loadsRes, trackRes, tripsRes, apptRes] = await Promise.all([
-        supabase.from('loads').select('*, customer:customers(company_name)').order('created_at', { ascending: false }),
+      const [shipmentsRes, trackRes, apptRes] = await Promise.all([
+        supabase.from('shipments').select('*, containers(*)').order('created_at', { ascending: false }),
         supabase.from('container_tracking').select('*'),
-        supabase.from('trips').select('*, driver:drivers(first_name, last_name), tractor:tractors(unit_number)'),
-        supabase.from('terminal_appointments').select('*'),
+        supabase.from('terminal_appointments').select('*, trip:trips(*, driver:drivers(first_name, last_name), tractor:tractors(unit_number))'),
       ]);
 
-      const loads = loadsRes.data || [];
+      const shipments = shipmentsRes.data || [];
       const tracking = trackRes.data || [];
-      const trips = tripsRes.data || [];
       const appointments = apptRes.data || [];
 
       const trackingMap: Record<string, any> = {};
       tracking.forEach((t: any) => { if (t.container_number) trackingMap[t.container_number] = t; });
 
-      const tripMap: Record<string, any> = {};
-      trips.forEach((t: any) => { if (t.load_id) tripMap[t.load_id] = t; });
-
       const apptMap: Record<string, any> = {};
       appointments.forEach((a: any) => { if (a.container_number) apptMap[a.container_number] = a; });
 
-      const details: ShipmentDetail[] = loads.map((load: any) => {
-        const track = trackingMap[load.container_number] || {};
-        const trip = tripMap[load.id] || {};
-        const appt = apptMap[load.container_number] || {};
-        return {
-          id: load.id,
-          load_number: load.load_number,
-          customer_name: load.customer?.company_name || '',
-          container_number: load.container_number || '',
-          container_size: load.container_size || '',
-          container_type: load.container_type || '',
-          move_type: load.move_type || '',
-          terminal: load.terminal || '',
-          status: load.status,
-          last_free_day: load.last_free_day || null,
-          is_hazmat: load.is_hazmat || false,
-          is_overweight: load.is_overweight || false,
-          emodal_status: track.emodal_status || null,
-          availability_status: track.availability_status || null,
-          has_customs_hold: track.has_customs_hold || load.hold_customs || false,
-          has_freight_hold: track.has_freight_hold || load.hold_freight || false,
-          has_usda_hold: track.has_usda_hold || load.hold_usda || false,
-          yard_location: track.yard_location || null,
-          last_checked_at: track.last_checked_at || null,
-          trip_id: trip.id || null,
-          trip_number: trip.trip_number || null,
-          trip_status: trip.status || null,
-          driver_name: trip.driver ? `${trip.driver.first_name} ${trip.driver.last_name}` : null,
-          tractor_number: trip.tractor?.unit_number || null,
-          appointment_id: appt.id || null,
-          appointment_date: appt.appointment_date || null,
-          appointment_status: appt.status || null,
-          appointment_slot: appt.time_slot || null,
-        };
+      const details: ShipmentDetail[] = [];
+      shipments.forEach((shipment: any) => {
+        const containers = shipment.containers || [];
+        containers.forEach((container: any) => {
+          const track = trackingMap[container.container_number] || {};
+          const appt = apptMap[container.container_number] || {};
+          const trip = appt.trip || {};
+          details.push({
+            id: container.id,
+            reference_number: shipment.reference_number || '',
+            customer_name: shipment.customer_name || '',
+            container_number: container.container_number || '',
+            container_size: container.size || '',
+            container_type: container.type || 'DRY',
+            terminal: shipment.terminal_name || '',
+            status: shipment.status || 'PENDING',
+            last_free_day: shipment.last_free_day || null,
+            is_hazmat: container.is_hazmat || false,
+            is_overweight: container.is_overweight || false,
+            customs_status: container.customs_status || 'PENDING',
+            emodal_status: track.emodal_status || null,
+            availability_status: track.availability_status || null,
+            has_customs_hold: track.has_customs_hold || false,
+            has_freight_hold: track.has_freight_hold || false,
+            has_usda_hold: track.has_usda_hold || false,
+            yard_location: track.yard_location || null,
+            last_checked_at: track.last_checked_at || null,
+            trip_id: trip.id || null,
+            trip_number: trip.trip_number || null,
+            trip_status: trip.status || null,
+            driver_name: trip.driver ? `${trip.driver.first_name} ${trip.driver.last_name}` : null,
+            tractor_number: trip.tractor?.unit_number || null,
+            appointment_id: appt.id || null,
+            appointment_date: appt.window_start_time || null,
+            appointment_status: appt.status || null,
+            appointment_slot: appt.confirmation_number || null,
+          });
+        });
       });
 
       setShipments(details);
@@ -117,7 +116,7 @@ export default function ShipmentsPage() {
     if (statusFilter && s.status !== statusFilter) return false;
     if (searchTerm) {
       const t = searchTerm.toLowerCase();
-      return s.load_number?.toLowerCase().includes(t) ||
+      return s.reference_number?.toLowerCase().includes(t) ||
         s.container_number?.toLowerCase().includes(t) ||
         s.customer_name?.toLowerCase().includes(t) ||
         (s.trip_number?.toLowerCase().includes(t) || false);
@@ -127,12 +126,11 @@ export default function ShipmentsPage() {
 
   const getStatusColor = (status: string) => {
     const map: Record<string, string> = {
-      TRACKING: 'bg-gray-100 text-gray-700', AVAILABLE: 'bg-green-100 text-green-800',
-      HOLD: 'bg-red-100 text-red-800', APPOINTMENT_NEEDED: 'bg-yellow-100 text-yellow-800',
-      READY_FOR_DISPATCH: 'bg-blue-100 text-blue-800', DISPATCHED: 'bg-blue-200 text-blue-900',
-      IN_YARD: 'bg-indigo-100 text-indigo-800', IN_TRANSIT: 'bg-purple-100 text-purple-800',
-      AT_PICKUP: 'bg-orange-100 text-orange-800', AT_DELIVERY: 'bg-orange-200 text-orange-900',
-      COMPLETED: 'bg-emerald-100 text-emerald-800', INVOICED: 'bg-teal-100 text-teal-800',
+      PENDING: 'bg-yellow-100 text-yellow-800',
+      CONFIRMED: 'bg-blue-100 text-blue-800',
+      IN_PROGRESS: 'bg-indigo-100 text-indigo-800',
+      DELIVERED: 'bg-green-100 text-green-800',
+      COMPLETED: 'bg-emerald-100 text-emerald-800',
       CANCELLED: 'bg-gray-200 text-gray-600',
     };
     return map[status] || 'bg-gray-100 text-gray-700';
@@ -187,14 +185,14 @@ export default function ShipmentsPage() {
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-3">
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-1.5 border rounded-lg text-sm">
           <option value="">All Status</option>
-          <option value="TRACKING">Tracking</option>
-          <option value="AVAILABLE">Available</option>
-          <option value="HOLD">On Hold</option>
-          <option value="DISPATCHED">Dispatched</option>
-          <option value="IN_TRANSIT">In Transit</option>
+          <option value="PENDING">Pending</option>
+          <option value="CONFIRMED">Confirmed</option>
+          <option value="IN_PROGRESS">In Progress</option>
+          <option value="DELIVERED">Delivered</option>
           <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
         </select>
-        <input type="text" placeholder="Search load, container, customer, trip..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="px-4 py-1.5 border rounded-lg text-sm flex-1 min-w-0" />
+        <input type="text" placeholder="Search reference, container, customer..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="px-4 py-1.5 border rounded-lg text-sm flex-1 min-w-0" />
         <button onClick={fetchShipments} className="px-4 py-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 text-sm">Refresh</button>
       </div>
 
@@ -227,7 +225,7 @@ export default function ShipmentsPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono font-semibold text-blue-600">{s.load_number}</span>
+                        <span className="font-mono font-semibold text-blue-600">{s.reference_number}</span>
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(s.status)}`}>
                           {s.status.replace(/_/g, ' ')}
                         </span>
@@ -266,8 +264,23 @@ export default function ShipmentsPage() {
                       {/* Container Status */}
                       <div className="bg-white rounded-lg p-4 shadow-sm">
                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Container Status</h4>
-                        {s.emodal_status ? (
-                          <div className="space-y-2 text-sm">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Size / Type:</span>
+                            <span className="font-medium">{s.container_size}' {s.container_type}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Customs:</span>
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                              s.customs_status === 'RELEASED' ? 'bg-green-100 text-green-800' :
+                              s.customs_status === 'HOLD' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>{s.customs_status}</span>
+                          </div>
+                          {s.is_hazmat && <div className="flex justify-between"><span className="text-gray-500">Hazmat:</span><span className="text-orange-600 font-medium">Yes</span></div>}
+                          {s.is_overweight && <div className="flex justify-between"><span className="text-gray-500">Overweight:</span><span className="text-red-600 font-medium">Yes</span></div>}
+                          {s.emodal_status && <>
+                            <hr className="my-1" />
                             <div className="flex justify-between"><span className="text-gray-500">eModal:</span><span className="font-medium">{s.emodal_status}</span></div>
                             <div className="flex justify-between">
                               <span className="text-gray-500">Availability:</span>
@@ -275,10 +288,8 @@ export default function ShipmentsPage() {
                             </div>
                             {s.yard_location && <div className="flex justify-between"><span className="text-gray-500">Yard:</span><span className="font-mono text-sm">{s.yard_location}</span></div>}
                             <div className="flex justify-between"><span className="text-gray-500">Checked:</span><span className="text-xs text-gray-400">{s.last_checked_at ? new Date(s.last_checked_at).toLocaleString() : '—'}</span></div>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-400 italic">Not synced with eModal</p>
-                        )}
+                          </>}
+                        </div>
                       </div>
 
                       {/* Appointment */}
