@@ -131,7 +131,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS customers (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        VARCHAR(255) NOT NULL,
+    company_name VARCHAR(255) NOT NULL,
     code        VARCHAR(50)  UNIQUE NOT NULL,
     type        VARCHAR(50)  NOT NULL DEFAULT 'both',
     address     VARCHAR(500),
@@ -1091,7 +1091,7 @@ END $$;
 
 -- customers
 CREATE INDEX IF NOT EXISTS idx_customers_code    ON customers(code);
-CREATE INDEX IF NOT EXISTS idx_customers_name    ON customers(name);
+CREATE INDEX IF NOT EXISTS idx_customers_company_name ON customers(company_name);
 
 -- shipments
 CREATE INDEX IF NOT EXISTS idx_shipments_customer        ON shipments(customer_id);
@@ -1388,7 +1388,7 @@ INSERT INTO locations (id, name, type, city, state, latitude, longitude) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- --- Customers ---
-INSERT INTO customers (id, name, code, type, city, state, email, phone) VALUES
+INSERT INTO customers (id, company_name, code, type, city, state, email, phone) VALUES
     ('880e8400-e29b-41d4-a716-446655440001', 'Acme Imports LLC',           'ACME',  'both',     'Los Angeles',    'CA', 'billing@acmeimports.com',     '(310) 555-0101'),
     ('880e8400-e29b-41d4-a716-446655440002', 'Pacific Goods Corp',         'PCFG',  'both',     'Long Beach',     'CA', 'ap@pacificgoods.com',         '(562) 555-0202'),
     ('880e8400-e29b-41d4-a716-446655440003', 'Golden Gate Trading',        'GGTD',  'both',     'Oakland',        'CA', 'accounts@goldengate.com',     '(510) 555-0303'),
