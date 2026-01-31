@@ -441,7 +441,13 @@ export async function updateTripStatus(id: string, status: string): Promise<bool
 export async function getShipments(): Promise<Shipment[]> {
   const { data, error } = await supabase
     .from('shipments')
-    .select(`*, containers(*)`)
+    .select(`
+      *,
+      containers(
+        *,
+        orders:orders(id, status, order_number, move_type_v2, sequence_number)
+      )
+    `)
     .order('created_at', { ascending: false });
   if (error) { console.error('Error:', error); return []; }
   return data || [];
