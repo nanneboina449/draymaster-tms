@@ -9,6 +9,8 @@ import {
   TRIP_TYPE_INFO
 } from '../../types';
 import { validateContainerNumber } from '../../lib/validations';
+import PDFUploader, { ExtractedLoadData } from './PDFUploader';
+import toast from 'react-hot-toast';
 
 interface ContainerInput {
   containerNumber: string;
@@ -75,7 +77,8 @@ const emptyLocation: LocationInput = {
 };
 
 export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0); // Start at step 0 for entry method selection
+  const [entryMethod, setEntryMethod] = useState<'manual' | 'pdf' | null>(null);
   const [formData, setFormData] = useState({
     type: 'IMPORT' as 'IMPORT' | 'EXPORT',
     customer: '',
@@ -102,6 +105,89 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
     preferredSize: '40',
   });
   const [containerErrors, setContainerErrors] = useState<Record<number, string | undefined>>({});
+  const [pdfExtractedData, setPdfExtractedData] = useState<ExtractedLoadData | null>(null);
+
+  // Handle PDF extraction
+  const handlePDFExtracted = (data: ExtractedLoadData) => {
+    setPdfExtractedData(data);
+
+    // Pre-fill form data from extracted PDF
+    setFormData(prev => ({
+      ...prev,
+      type: data.type || prev.type,
+      customer: data.customerName || prev.customer,
+      steamshipLine: data.steamshipLine || prev.steamshipLine,
+      bookingNumber: data.bookingNumber || prev.bookingNumber,
+      billOfLading: data.billOfLading || prev.billOfLading,
+      vessel: data.vessel || prev.vessel,
+      voyage: data.voyage || prev.voyage,
+      terminal: data.terminalName || prev.terminal,
+      lastFreeDay: data.lastFreeDay || prev.lastFreeDay,
+      portCutoff: data.portCutoff || prev.portCutoff,
+      earliestReturnDate: data.earliestReturnDate || prev.earliestReturnDate,
+      specialInstructions: data.specialInstructions || prev.specialInstructions,
+    }));
+
+    // Pre-fill containers
+    if (data.containers && data.containers.length > 0) {
+      const mappedContainers: ContainerInput[] = data.containers.map(c => ({
+        containerNumber: c.containerNumber || '',
+        size: (c.size as ContainerSize) || '40',
+        type: (c.type as ContainerType) || 'DRY',
+        weight: c.weightLbs?.toString() || '',
+        sealNumber: c.sealNumber || '',
+        isHazmat: c.isHazmat || false,
+        hazmatClass: c.hazmatClass || '',
+        hazmatUN: c.hazmatUnNumber || '',
+        isOverweight: c.isOverweight || false,
+        isReefer: c.isReefer || false,
+        reeferTemp: c.reeferTemp?.toString() || '',
+        customsStatus: 'PENDING' as CustomsStatus,
+        terminalAvailableDate: '',
+      }));
+      setContainers(mappedContainers);
+    }
+
+    // Pre-fill delivery location (for imports)
+    if (data.type === 'IMPORT' && (data.deliveryAddress || data.deliveryCity)) {
+      setDeliveryLocation(prev => ({
+        ...prev,
+        name: data.deliveryLocationName || prev.name,
+        address: data.deliveryAddress || prev.address,
+        city: data.deliveryCity || prev.city,
+        state: data.deliveryState || prev.state,
+        zip: data.deliveryZip || prev.zip,
+        contactName: data.deliveryContactName || prev.contactName,
+        contactPhone: data.deliveryContactPhone || prev.contactPhone,
+      }));
+    }
+
+    // Pre-fill pickup location (for exports)
+    if (data.type === 'EXPORT' && (data.pickupAddress || data.pickupCity)) {
+      setPickupLocation(prev => ({
+        ...prev,
+        name: data.pickupLocationName || prev.name,
+        address: data.pickupAddress || prev.address,
+        city: data.pickupCity || prev.city,
+        state: data.pickupState || prev.state,
+        zip: data.pickupZip || prev.zip,
+        contactName: data.pickupContactName || prev.contactName,
+        contactPhone: data.pickupContactPhone || prev.contactPhone,
+      }));
+    }
+
+    // Show success message with confidence
+    const confidencePercent = Math.round((data.confidence || 0) * 100);
+    toast.success(`Extracted ${data.containers?.length || 0} container(s) with ${confidencePercent}% confidence`);
+
+    // Move to step 1 (shipment info)
+    setEntryMethod('pdf');
+    setStep(1);
+  };
+
+  const handlePDFError = (error: string) => {
+    toast.error(error);
+  };
 
   if (!isOpen) return null;
 
@@ -240,36 +326,56 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
     setContainers([{ ...emptyContainer }]);
     setPickupLocation({ ...emptyLocation });
     setDeliveryLocation({ ...emptyLocation });
-    setStep(1);
+    setStep(0);
+    setEntryMethod(null);
+    setPdfExtractedData(null);
   };
 
-  const renderStepIndicator = () => (
-    <div className="flex items-center justify-center gap-2 mt-4">
-      {[1, 2, 3, 4, 5].map((s) => (
-        <div key={s} className="flex items-center">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium cursor-pointer ${
-              step === s
-                ? 'bg-white text-blue-600'
-                : step > s
-                ? 'bg-blue-400 text-white'
-                : 'bg-blue-500/50 text-white/70'
-            }`}
-            onClick={() => s < step && setStep(s)}
-          >
-            {step > s ? '✓' : s}
+  const renderStepIndicator = () => {
+    // Don't show indicator on step 0 (entry method selection)
+    if (step === 0) return null;
+
+    return (
+      <div className="flex items-center justify-center gap-2 mt-4">
+        {[1, 2, 3, 4, 5].map((s) => (
+          <div key={s} className="flex items-center">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium cursor-pointer ${
+                step === s
+                  ? 'bg-white text-blue-600'
+                  : step > s
+                  ? 'bg-blue-400 text-white'
+                  : 'bg-blue-500/50 text-white/70'
+              }`}
+              onClick={() => s < step && setStep(s)}
+            >
+              {step > s ? '✓' : s}
+            </div>
+            {s < 5 && <div className={`w-8 h-0.5 ${step > s ? 'bg-blue-400' : 'bg-blue-500/50'}`}></div>}
           </div>
-          {s < 5 && <div className={`w-8 h-0.5 ${step > s ? 'bg-blue-400' : 'bg-blue-500/50'}`}></div>}
-        </div>
-      ))}
-    </div>
-  );
+        ))}
+      </div>
+    );
+  };
 
   const renderStepTitle = () => {
+    if (step === 0) {
+      return (
+        <div className="text-center mt-2">
+          <span className="text-white/80 text-sm">Choose Entry Method</span>
+        </div>
+      );
+    }
+
     const titles = ['Shipment Info', 'Containers', 'Locations', 'Trip Details', 'Review'];
     return (
       <div className="text-center mt-2">
         <span className="text-white/80 text-sm">{titles[step - 1]}</span>
+        {entryMethod === 'pdf' && pdfExtractedData && (
+          <span className="ml-2 text-xs bg-green-500 text-white px-2 py-0.5 rounded-full">
+            From PDF
+          </span>
+        )}
       </div>
     );
   };
@@ -293,6 +399,88 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
 
           {/* Content */}
           <div className="p-6 overflow-y-auto max-h-[60vh]">
+            {/* Step 0: Entry Method Selection */}
+            {step === 0 && (
+              <div className="space-y-6">
+                <div className="text-center mb-8">
+                  <h3 className="text-xl font-semibold text-gray-800">How would you like to enter load information?</h3>
+                  <p className="text-gray-500 mt-2">Upload a document for automatic extraction or enter details manually</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  {/* PDF Upload Option */}
+                  <div className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-300 transition-colors">
+                    <div className="text-center mb-4">
+                      <div className="w-16 h-16 mx-auto bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                        <svg className="w-8 h-8 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                      </div>
+                      <h4 className="font-semibold text-gray-800">Upload PDF</h4>
+                      <p className="text-sm text-gray-500 mt-1">Rate confirmation, BOL, or booking document</p>
+                    </div>
+                    <PDFUploader
+                      onExtracted={handlePDFExtracted}
+                      onError={handlePDFError}
+                    />
+                    <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-400">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      <span>AI-powered extraction</span>
+                    </div>
+                  </div>
+
+                  {/* Manual Entry Option */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEntryMethod('manual');
+                      setStep(1);
+                    }}
+                    className="border-2 border-gray-200 rounded-xl p-6 hover:border-blue-500 hover:bg-blue-50 transition-all text-left group"
+                  >
+                    <div className="text-center">
+                      <div className="w-16 h-16 mx-auto bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center mb-4 transition-colors">
+                        <svg className="w-8 h-8 text-gray-600 group-hover:text-blue-600 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                        </svg>
+                      </div>
+                      <h4 className="font-semibold text-gray-800 group-hover:text-blue-800">Manual Entry</h4>
+                      <p className="text-sm text-gray-500 mt-1">Enter shipment details step by step</p>
+                      <div className="mt-6 py-3 px-4 bg-gray-100 group-hover:bg-blue-100 rounded-lg transition-colors">
+                        <span className="text-sm font-medium text-gray-600 group-hover:text-blue-600">Start Manual Entry →</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Quick stats */}
+                <div className="mt-8 p-4 bg-gray-50 rounded-xl">
+                  <div className="flex items-center justify-center gap-8 text-sm text-gray-500">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span>Extracts container numbers</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span>Detects dates & addresses</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <svg className="w-5 h-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span>Identifies SSL & terminals</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Step 1: Shipment Info */}
             {step === 1 && (
               <div className="space-y-6">
@@ -1172,7 +1360,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
 
           {/* Footer */}
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-            {stepErrors.length > 0 && (
+            {step > 0 && stepErrors.length > 0 && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm font-medium text-red-800 mb-1">Please fix the following errors:</p>
                 <ul className="text-sm text-red-600 list-disc list-inside">
@@ -1182,24 +1370,55 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
                 </ul>
               </div>
             )}
+
+            {/* PDF extraction info banner */}
+            {step > 0 && entryMethod === 'pdf' && pdfExtractedData && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm text-blue-800">
+                    Data extracted from PDF ({Math.round((pdfExtractedData.confidence || 0) * 100)}% confidence). Please review and correct any fields.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStep(0)}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  Upload different file
+                </button>
+              </div>
+            )}
+
             <div className="flex justify-between">
               <button
                 type="button"
                 onClick={() => {
                   setStepErrors([]);
-                  step > 1 ? setStep(step - 1) : onClose();
+                  if (step === 0) {
+                    onClose();
+                  } else if (step === 1) {
+                    setStep(0);
+                    setEntryMethod(null);
+                  } else {
+                    setStep(step - 1);
+                  }
                 }}
                 className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
               >
-                {step === 1 ? 'Cancel' : 'Back'}
+                {step === 0 ? 'Cancel' : step === 1 ? 'Back to Start' : 'Back'}
               </button>
-              <button
-                type="button"
-                onClick={() => step < 5 ? handleNextStep() : handleSubmit()}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                {step < 5 ? 'Continue' : 'Create Shipment'}
-              </button>
+              {step > 0 && (
+                <button
+                  type="button"
+                  onClick={() => step < 5 ? handleNextStep() : handleSubmit()}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  {step < 5 ? 'Continue' : 'Create Shipment'}
+                </button>
+              )}
             </div>
           </div>
         </div>
