@@ -1304,6 +1304,16 @@ BEGIN
     END IF;
 
     -- ── shipments ─────────────────────────────────────────────────────────
+    -- FK columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'customer_id') THEN
+        ALTER TABLE shipments ADD COLUMN customer_id UUID REFERENCES customers(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'steamship_line_id') THEN
+        ALTER TABLE shipments ADD COLUMN steamship_line_id UUID REFERENCES steamship_lines(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'port_id') THEN
+        ALTER TABLE shipments ADD COLUMN port_id UUID REFERENCES ports(id);
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'terminal_id') THEN
         ALTER TABLE shipments ADD COLUMN terminal_id UUID REFERENCES locations(id);
     END IF;
@@ -1358,6 +1368,21 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'chassis_number') THEN
         ALTER TABLE trips ADD COLUMN chassis_number VARCHAR(50);
+    END IF;
+
+    -- ── loads ─────────────────────────────────────────────────────────────
+    -- Appointment columns added in 002 but not in 004
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'terminal_appointment_date') THEN
+        ALTER TABLE loads ADD COLUMN terminal_appointment_date DATE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'terminal_appointment_time') THEN
+        ALTER TABLE loads ADD COLUMN terminal_appointment_time VARCHAR(10);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'delivery_appointment_date') THEN
+        ALTER TABLE loads ADD COLUMN delivery_appointment_date DATE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'delivery_appointment_time') THEN
+        ALTER TABLE loads ADD COLUMN delivery_appointment_time VARCHAR(10);
     END IF;
 
     -- ── trip_stops ────────────────────────────────────────────────────────
