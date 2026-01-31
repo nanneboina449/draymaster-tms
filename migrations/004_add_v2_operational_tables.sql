@@ -303,3 +303,65 @@ CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(created_at 
 CREATE INDEX IF NOT EXISTS idx_container_tracking_num ON container_tracking(container_number);
 
 CREATE INDEX IF NOT EXISTS idx_driver_assignments_driver ON driver_rate_assignments(driver_id);
+
+-- ==============================================================================
+-- 15. EXTEND shipment_status ENUM
+-- ==============================================================================
+-- The Loads page status dropdown includes CONFIRMED and DELIVERED, which were
+-- not in the original enum.  ADD VALUE IF NOT EXISTS is idempotent.
+-- ==============================================================================
+
+ALTER TYPE shipment_status ADD VALUE IF NOT EXISTS 'CONFIRMED';
+ALTER TYPE shipment_status ADD VALUE IF NOT EXISTS 'DELIVERED';
+
+-- ==============================================================================
+-- 16. ALTER shipments — nullable FKs + text columns for the wizard
+-- ==============================================================================
+-- The NewLoadModal 5-step wizard collects plain-text values (customer name,
+-- SSL name, terminal name) rather than FK UUIDs.  The FK columns are kept
+-- for rows that were seeded with proper lookups; new wizard-created rows
+-- populate the text columns instead.  All statements are guarded so this
+-- migration is safe to re-run.
+-- ==============================================================================
+
+-- Drop NOT NULL on FK columns so wizard rows don't need lookup UUIDs
+DO $$
+BEGIN
+    ALTER TABLE shipments ALTER COLUMN customer_id DROP NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE shipments ALTER COLUMN steamship_line_id DROP NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE shipments ALTER COLUMN port_id DROP NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE shipments ALTER COLUMN terminal_id DROP NOT NULL;
+EXCEPTION WHEN undefined_column THEN NULL;
+END $$;
+
+-- Text columns for wizard-submitted values
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS customer_name      VARCHAR(255);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS steamship_line     VARCHAR(255);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS booking_number     VARCHAR(100);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS bill_of_lading     VARCHAR(100);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS vessel             VARCHAR(255);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS voyage             VARCHAR(50);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS terminal_name      VARCHAR(255);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS trip_type          VARCHAR(50);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS chassis_required   BOOLEAN DEFAULT TRUE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS chassis_pool       VARCHAR(100);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS chassis_size       VARCHAR(20);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_address   VARCHAR(500);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_city      VARCHAR(100);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_state     VARCHAR(50);
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivery_zip       VARCHAR(20);

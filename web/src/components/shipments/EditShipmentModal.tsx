@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { Shipment, Container, updateShipment, addContainer, updateContainer, deleteContainer } from '../../lib/supabase';
 
 interface EditShipmentModalProps {
+  isOpen: boolean;
   shipment: Shipment;
   onClose: () => void;
   onSave: () => void;
 }
 
-export function EditShipmentModal({ shipment, onClose, onSave }: EditShipmentModalProps) {
+export function EditShipmentModal({ isOpen, shipment, onClose, onSave }: EditShipmentModalProps) {
+  if (!isOpen) return null;
   const [activeTab, setActiveTab] = useState<'details' | 'containers'>('details');
   const [loading, setLoading] = useState(false);
   const [containers, setContainers] = useState<Container[]>(shipment.containers || []);
@@ -133,14 +135,14 @@ export function EditShipmentModal({ shipment, onClose, onSave }: EditShipmentMod
       container_number: container.container_number || '',
       size: container.size || '40',
       type: container.type || 'DRY',
-      weight: String(container.weight || ''),
+      weight: String(container.weight_lbs || ''),
       seal_number: container.seal_number || '',
       is_hazmat: container.is_hazmat || false,
       hazmat_class: container.hazmat_class || '',
-      hazmat_un: container.hazmat_un || '',
+      hazmat_un: container.un_number || '',
       is_overweight: container.is_overweight || false,
       is_reefer: container.is_reefer || false,
-      reefer_temp: String(container.reefer_temp || ''),
+      reefer_temp: String(container.reefer_temp_setpoint || ''),
       customs_status: container.customs_status || 'PENDING',
     });
     setIsAddingContainer(false);
@@ -491,7 +493,7 @@ export function EditShipmentModal({ shipment, onClose, onSave }: EditShipmentMod
                             {container.is_overweight && <span className="text-red-500" title="Overweight">⚖️</span>}
                           </div>
                           <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
-                            <div>Weight: {container.weight?.toLocaleString() || '-'} lbs</div>
+                            <div>Weight: {container.weight_lbs?.toLocaleString() || '-'} lbs</div>
                             <div>Seal: {container.seal_number || '-'}</div>
                             <div>
                               Customs: 

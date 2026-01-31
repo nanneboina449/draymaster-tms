@@ -118,10 +118,30 @@ export interface TripLeg {
 
 export interface Shipment {
   id: string;
+  reference_number?: string;
   shipment_number?: string;
   customer_id?: string;
+  customer_name?: string;
   type?: string;
   status?: string;
+  steamship_line?: string;
+  booking_number?: string;
+  bill_of_lading?: string;
+  vessel?: string;
+  voyage?: string;
+  terminal_name?: string;
+  last_free_day?: string;
+  port_cutoff?: string;
+  trip_type?: string;
+  chassis_required?: boolean;
+  chassis_pool?: string;
+  chassis_size?: string;
+  delivery_address?: string;
+  delivery_city?: string;
+  delivery_state?: string;
+  delivery_zip?: string;
+  special_instructions?: string;
+  containers?: any[];
   container_number?: string;
   created_at?: string;
 }
@@ -326,20 +346,126 @@ export async function updateTrip(id: string, updates: Partial<Trip>): Promise<bo
 export async function getShipments(): Promise<Shipment[]> {
   const { data, error } = await supabase
     .from('shipments')
-    .select(`*, customer:customers(*)`)
+    .select(`*, containers(*)`)
     .order('created_at', { ascending: false });
   if (error) { console.error('Error:', error); return []; }
   return data || [];
 }
 
-export async function createShipment(shipment: Partial<Shipment>): Promise<Shipment | null> {
-  const { data, error } = await supabase.from('shipments').insert(shipment).select().single();
+export async function createShipment(shipment: any, containers?: any[]): Promise<Shipment | null> {
+  const referenceNumber = `SHP-${Date.now().toString().slice(-8)}`;
+  const { data, error } = await supabase
+    .from('shipments')
+    .insert({ ...shipment, reference_number: referenceNumber })
+    .select()
+    .single();
   if (error) { console.error('Error:', error); return null; }
+
+  if (containers && containers.length > 0 && data) {
+    const rows = containers.map(c => ({
+      shipment_id: data.id,
+      container_number: c.container_number,
+      size: c.size,
+      type: c.type,
+      weight_lbs: c.weight || null,
+      seal_number: c.seal_number || null,
+      is_hazmat: c.is_hazmat || false,
+      hazmat_class: c.hazmat_class || null,
+      is_overweight: c.is_overweight || false,
+      is_reefer: c.is_reefer || false,
+      reefer_temp_setpoint: c.reefer_temp || null,
+      customs_status: c.customs_status || 'PENDING',
+    }));
+    await supabase.from('containers').insert(rows);
+  }
+
   return data;
 }
 
 export async function updateShipment(id: string, updates: Partial<Shipment>): Promise<boolean> {
   const { error } = await supabase.from('shipments').update(updates).eq('id', id);
+  return !error;
+}
+
+export async function deleteShipment(id: string): Promise<boolean> {
+  const { error } = await supabase.from('shipments').delete().eq('id', id);
+  return !error;
+}
+
+export async function updateShipmentStatus(id: string, status: string): Promise<boolean> {
+  const { error } = await supabase.from('shipments').update({ status }).eq('id', id);
+  return !error;
+}
+
+// CONTAINERS
+export interface Container {
+  id: string;
+  shipment_id: string;
+  container_number: string;
+  size: string;
+  type: string;
+  weight_lbs?: number;
+  seal_number?: string;
+  is_hazmat?: boolean;
+  hazmat_class?: string;
+  un_number?: string;
+  is_overweight?: boolean;
+  is_reefer?: boolean;
+  reefer_temp_setpoint?: number;
+  customs_status?: string;
+  created_at?: string;
+}
+
+export async function addContainer(container: any): Promise<Container | null> {
+  const { data, error } = await supabase
+    .from('containers')
+    .insert({
+      shipment_id: container.shipment_id,
+      container_number: container.container_number,
+      size: container.size,
+      type: container.type,
+      weight_lbs: container.weight || null,
+      seal_number: container.seal_number || null,
+      is_hazmat: container.is_hazmat || false,
+      hazmat_class: container.hazmat_class || null,
+      un_number: container.hazmat_un || null,
+      is_overweight: container.is_overweight || false,
+      is_reefer: container.is_reefer || false,
+      reefer_temp_setpoint: container.reefer_temp || null,
+      customs_status: container.customs_status || 'PENDING',
+    })
+    .select()
+    .single();
+  if (error) { console.error('Error:', error); return null; }
+  return data;
+}
+
+export async function updateContainer(id: string, updates: any): Promise<Container | null> {
+  const { data, error } = await supabase
+    .from('containers')
+    .update({
+      container_number: updates.container_number,
+      size: updates.size,
+      type: updates.type,
+      weight_lbs: updates.weight || null,
+      seal_number: updates.seal_number || null,
+      is_hazmat: updates.is_hazmat || false,
+      hazmat_class: updates.hazmat_class || null,
+      un_number: updates.hazmat_un || null,
+      is_overweight: updates.is_overweight || false,
+      is_reefer: updates.is_reefer || false,
+      reefer_temp_setpoint: updates.reefer_temp || null,
+      customs_status: updates.customs_status || 'PENDING',
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) { console.error('Error:', error); return null; }
+  return data;
+}
+
+export async function deleteContainer(id: string): Promise<boolean> {
+  const { error } = await supabase.from('containers').delete().eq('id', id);
   return !error;
 }
 
