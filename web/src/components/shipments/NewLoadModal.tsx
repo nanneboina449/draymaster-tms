@@ -106,6 +106,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
   });
   const [containerErrors, setContainerErrors] = useState<Record<number, string | undefined>>({});
   const [pdfExtractedData, setPdfExtractedData] = useState<ExtractedLoadData | null>(null);
+  const [stepErrors, setStepErrors] = useState<string[]>([]);
 
   // Handle PDF extraction
   const handlePDFExtracted = (data: ExtractedLoadData) => {
@@ -202,8 +203,6 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
       [index]: result.valid ? undefined : result.error,
     }));
   };
-
-  const [stepErrors, setStepErrors] = useState<string[]>([]);
 
   const validateCurrentStep = (): boolean => {
     const errors: string[] = [];
