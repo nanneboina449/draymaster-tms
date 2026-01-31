@@ -1341,6 +1341,21 @@ BEGIN
         ALTER TABLE orders ADD COLUMN deleted_at TIMESTAMPTZ;
     END IF;
 
+    -- ── containers ────────────────────────────────────────────────────────
+    -- Columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_state') THEN
+        ALTER TABLE containers ADD COLUMN current_state container_state NOT NULL DEFAULT 'LOADED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_location_type') THEN
+        ALTER TABLE containers ADD COLUMN current_location_type location_type NOT NULL DEFAULT 'VESSEL';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_location_id') THEN
+        ALTER TABLE containers ADD COLUMN current_location_id UUID REFERENCES locations(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'customs_status') THEN
+        ALTER TABLE containers ADD COLUMN customs_status customs_status NOT NULL DEFAULT 'PENDING';
+    END IF;
+
     -- ── drivers ───────────────────────────────────────────────────────────
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'drivers' AND column_name = 'is_active') THEN
         ALTER TABLE drivers ADD COLUMN is_active BOOLEAN DEFAULT TRUE;
