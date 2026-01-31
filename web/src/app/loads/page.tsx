@@ -102,11 +102,10 @@ export default function LoadsPage() {
         ...form,
         weight_lbs: form.weight_lbs ? parseInt(form.weight_lbs) : null,
       };
-      if (editingLoad) {
-        await updateLoad(editingLoad.id, payload);
-      } else {
-        await createLoad(payload);
-      }
+      const result = editingLoad
+        ? await updateLoad(editingLoad.id, payload)
+        : await createLoad(payload);
+      if (!result) throw new Error('Save failed — check the browser console for details');
       setIsModalOpen(false);
       await fetchData();
     } catch (err: any) {
