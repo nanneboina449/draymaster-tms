@@ -309,7 +309,7 @@ SELECT
     COUNT(DISTINCT CASE WHEN o.status = 'COMPLETED' THEN o.id END) AS completed_orders,
     COUNT(DISTINCT CASE WHEN o.status IN ('DISPATCHED', 'IN_PROGRESS') THEN o.id END) AS active_orders
 FROM shipments s
-LEFT JOIN containers c ON c.shipment_id = s.id AND c.deleted_at IS NULL
+LEFT JOIN containers c ON c.shipment_id = s.id
 LEFT JOIN orders o ON o.shipment_id = s.id AND o.deleted_at IS NULL
 GROUP BY s.id
 ORDER BY s.created_at DESC;
@@ -345,7 +345,6 @@ SELECT
     ) AS orders
 FROM containers c
 JOIN shipments s ON c.shipment_id = s.id
-WHERE c.deleted_at IS NULL
 ORDER BY c.created_at DESC;
 
 -- ==============================================================================
