@@ -6,38 +6,15 @@ import {
   mergeExtractedData,
 } from '@/lib/pdf-extractor';
 
-// PDF.js for text extraction (works in Node.js environment)
+// Extract text from PDF using pdf-parse
 async function extractTextFromPDF(buffer: ArrayBuffer): Promise<string> {
-  // Dynamic import to handle both server and edge runtimes
   try {
     const pdfParse = (await import('pdf-parse')).default;
     const data = await pdfParse(Buffer.from(buffer));
     return data.text;
   } catch (error) {
-    // Fallback: try using pdfjs-dist
-    try {
-      const pdfjsLib = await import('pdfjs-dist');
-
-      // Set worker source
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-      let fullText = '';
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items
-          .map((item: any) => item.str)
-          .join(' ');
-        fullText += pageText + '\n';
-      }
-
-      return fullText;
-    } catch (pdfJsError) {
-      console.error('PDF parsing failed:', pdfJsError);
-      throw new Error('Failed to extract text from PDF. Please ensure the file is a valid PDF.');
-    }
+    console.error('PDF parsing failed:', error);
+    throw new Error('Failed to extract text from PDF. Please ensure the file is a valid PDF.');
   }
 }
 
