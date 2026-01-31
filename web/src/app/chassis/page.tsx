@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
 interface ChassisUsage {
@@ -47,6 +47,13 @@ export default function ChassisManagementPage() {
   const [filterStatus, setFilterStatus] = useState('OUT');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUsage, setEditingUsage] = useState<ChassisUsage | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [auditResults, setAuditResults] = useState<{
+    matched: { chassis_number: string; invoice_amount: number; usage_amount: number; diff: number; usage_id: string }[];
+    unmatched: { chassis_number: string; invoice_amount: number }[];
+  } | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     chassis_number: '',
@@ -238,6 +245,66 @@ export default function ChassisManagementPage() {
       alert('Street turn recorded successfully!');
     } catch (err: any) {
       alert('Error: ' + err.message);
+    }
+  };
+
+  const handleAuditUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAuditLoading(true);
+    setAuditResults(null);
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) { alert('CSV must have a header row and at least one data row.'); return; }
+
+      // Parse: expect chassis_number and amount columns (flexible header detection)
+      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+      const chassisCol = headers.findIndex(h => h.includes('chassis'));
+      const amountCol = headers.findIndex(h => h.includes('amount') || h.includes('charge') || h.includes('total'));
+      if (chassisCol < 0 || amountCol < 0) { alert('CSV must contain chassis number and amount columns.'); return; }
+
+      const invoiceRows = lines.slice(1).map(line => {
+        const cols = line.split(',').map(c => c.replace(/"/g, '').trim());
+        return { chassis_number: cols[chassisCol]?.toUpperCase() || '', amount: parseFloat(cols[amountCol]) || 0 };
+      }).filter(r => r.chassis_number);
+
+      // Fetch all chassis usage records for matching
+      const { data: usageData } = await supabase.from('chassis_usage').select('*');
+      const usageMap = new Map<string, any[]>();
+      (usageData || []).forEach((u: any) => {
+        const key = u.chassis_number?.toUpperCase();
+        if (key) usageMap.set(key, [...(usageMap.get(key) || []), u]);
+      });
+
+      const matched: typeof auditResults extends { matched: infer M } | null ? M : never = [];
+      const unmatched: { chassis_number: string; invoice_amount: number }[] = [];
+
+      invoiceRows.forEach(inv => {
+        const usages = usageMap.get(inv.chassis_number);
+        if (usages && usages.length > 0) {
+          // Match against most recent usage record
+          const usage = usages.sort((a: any, b: any) => new Date(b.pickup_date).getTime() - new Date(a.pickup_date).getTime())[0];
+          const usageAmount = usage.per_diem_amount || 0;
+          matched.push({
+            chassis_number: inv.chassis_number,
+            invoice_amount: inv.amount,
+            usage_amount: usageAmount,
+            diff: inv.amount - usageAmount,
+            usage_id: usage.id,
+          });
+        } else {
+          unmatched.push({ chassis_number: inv.chassis_number, invoice_amount: inv.amount });
+        }
+      });
+
+      setAuditResults({ matched, unmatched });
+    } catch (err: any) {
+      console.error('Audit error:', err);
+      alert('Error processing CSV: ' + err.message);
+    } finally {
+      setAuditLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -471,14 +538,136 @@ export default function ChassisManagementPage() {
           )}
 
           {activeTab === 'audit' && (
-            <div className="text-center py-8 text-gray-500">
-              <div className="text-6xl mb-4">📋</div>
-              <p>Invoice Audit Feature</p>
-              <p className="text-sm">Upload DCLI/Flexi-Van invoices to reconcile with usage records</p>
-              <button className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                Upload Invoice CSV
-              </button>
-            </div>
+            <>
+              <div className="flex justify-between items-center mb-4">
+                <p className="text-gray-600">Upload pool invoices to reconcile against usage records</p>
+                <div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleAuditUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={auditLoading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {auditLoading ? 'Processing...' : 'Upload Invoice CSV'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg border text-sm text-gray-600">
+                <strong>Expected CSV format:</strong> Headers must include a chassis number column and an amount/charge column.
+                Example: <code className="bg-white px-1 rounded border">chassis_number,amount</code> or <code className="bg-white px-1 rounded border">Chassis #,Total Charge</code>
+              </div>
+
+              {!auditResults && !auditLoading && (
+                <div className="text-center py-12 text-gray-400">
+                  <div className="text-5xl mb-3">📋</div>
+                  <p>Upload an invoice CSV to begin reconciliation</p>
+                </div>
+              )}
+
+              {auditLoading && (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <p className="text-sm text-gray-500 mt-2">Processing invoice...</p>
+                </div>
+              )}
+
+              {auditResults && (
+                <>
+                  {/* Summary */}
+                  <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="bg-blue-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-600">{auditResults.matched.length + auditResults.unmatched.length}</p>
+                      <p className="text-xs text-gray-500">Total Invoice Lines</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-green-600">{auditResults.matched.length}</p>
+                      <p className="text-xs text-gray-500">Matched</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-4 text-center">
+                      <p className="text-2xl font-bold text-red-600">{auditResults.unmatched.length}</p>
+                      <p className="text-xs text-gray-500">Unmatched</p>
+                    </div>
+                    <div className={`rounded-lg p-4 text-center ${auditResults.matched.reduce((s, m) => s + m.diff, 0) === 0 ? 'bg-green-50' : 'bg-orange-50'}`}>
+                      <p className={`text-2xl font-bold ${auditResults.matched.reduce((s, m) => s + m.diff, 0) === 0 ? 'text-green-600' : 'text-orange-600'}`}>
+                        ${Math.abs(auditResults.matched.reduce((s, m) => s + m.diff, 0)).toFixed(2)}
+                      </p>
+                      <p className="text-xs text-gray-500">Total Variance</p>
+                    </div>
+                  </div>
+
+                  {/* Matched */}
+                  {auditResults.matched.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="font-semibold text-gray-700 mb-2">Matched Records</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Chassis</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Invoice Amt</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Usage Amt</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {auditResults.matched.map((row, i) => (
+                              <tr key={i} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 font-mono">{row.chassis_number}</td>
+                                <td className="px-4 py-2 text-right">${row.invoice_amount.toFixed(2)}</td>
+                                <td className="px-4 py-2 text-right">${row.usage_amount.toFixed(2)}</td>
+                                <td className={`px-4 py-2 text-right font-semibold ${row.diff === 0 ? 'text-green-600' : row.diff > 0 ? 'text-red-600' : 'text-orange-600'}`}>
+                                  {row.diff > 0 ? '+' : ''}{row.diff.toFixed(2)}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <span className={`px-2 py-1 rounded-full text-xs ${row.diff === 0 ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>
+                                    {row.diff === 0 ? 'Exact Match' : 'Variance'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unmatched */}
+                  {auditResults.unmatched.length > 0 && (
+                    <div>
+                      <h4 className="font-semibold text-red-700 mb-2">Unmatched Invoice Lines</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-red-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-red-600 uppercase">Chassis</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-red-600 uppercase">Invoice Amount</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-red-600 uppercase">Note</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {auditResults.unmatched.map((row, i) => (
+                              <tr key={i} className="bg-red-50 hover:bg-red-100">
+                                <td className="px-4 py-2 font-mono">{row.chassis_number}</td>
+                                <td className="px-4 py-2 text-right font-semibold text-red-600">${row.invoice_amount.toFixed(2)}</td>
+                                <td className="px-4 py-2 text-xs text-red-500">No matching usage record found</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       </div>

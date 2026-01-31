@@ -6,6 +6,9 @@ import { supabase } from '../../lib/supabase';
 export default function StreetTurnsPage() {
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createdTurns, setCreatedTurns] = useState<any[]>([]);
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => { fetchMatches(); }, []);
 
@@ -68,6 +71,43 @@ export default function StreetTurnsPage() {
     return match.match_type === 'SAME_TERMINAL' ? 200 : 150;
   };
 
+  const createStreetTurn = async (match: any, idx: number) => {
+    setCreating(true);
+    try {
+      // Look up shipment IDs by reference number
+      const [{ data: impShipments }, { data: expShipments }] = await Promise.all([
+        supabase.from('shipments').select('id').eq('reference_number', match.import_ref).limit(1),
+        supabase.from('shipments').select('id').eq('reference_number', match.export_ref).limit(1),
+      ]);
+
+      const importShipmentId = impShipments?.[0]?.id || null;
+      const exportShipmentId = expShipments?.[0]?.id || null;
+
+      const { error } = await supabase.from('street_turns').insert({
+        import_shipment_id: importShipmentId,
+        export_shipment_id: exportShipmentId,
+        import_container: match.import_container,
+        container_size: match.container_size,
+        import_terminal: match.import_terminal,
+        export_terminal: match.export_terminal,
+        status: 'POTENTIAL',
+        estimated_savings: savingsEstimate(match),
+        created_at: new Date().toISOString(),
+      });
+
+      if (error) throw error;
+
+      setCreatedTurns(prev => [...prev, { ...match, created_at: new Date() }]);
+      setMatches(prev => prev.filter((_, i) => i !== idx));
+      setConfirmIdx(null);
+    } catch (err: any) {
+      console.error('Error creating street turn:', err);
+      alert('Failed to create street turn: ' + err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -115,7 +155,26 @@ export default function StreetTurnsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-600 font-semibold">Save ~${savingsEstimate(match)}</span>
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Create Street Turn</button>
+                  {confirmIdx === idx ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-600 mr-1">Confirm?</span>
+                      <button
+                        onClick={() => createStreetTurn(match, idx)}
+                        disabled={creating}
+                        className="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm disabled:opacity-50"
+                      >
+                        {creating ? '...' : 'Yes'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmIdx(null)}
+                        className="px-3 py-1 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmIdx(idx)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Create Street Turn</button>
+                  )}
                 </div>
               </div>
               <div className="p-4 grid grid-cols-2 gap-6">
@@ -142,6 +201,31 @@ export default function StreetTurnsPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Created Street Turns */}
+      {createdTurns.length > 0 && (
+        <div className="bg-white rounded-xl shadow">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <h3 className="font-semibold text-gray-800">Created This Session</h3>
+            <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">{createdTurns.length} created</span>
+          </div>
+          <div className="divide-y">
+            {createdTurns.map((turn, i) => (
+              <div key={i} className="px-6 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <span className="font-mono text-sm text-gray-700">{turn.import_container}</span>
+                  <span className="text-xs text-gray-400">{turn.container_size}'</span>
+                  <span className="text-sm text-gray-600">{turn.import_ref} → {turn.export_ref}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-green-600 font-semibold">~${savingsEstimate(turn)} saved</span>
+                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">POTENTIAL</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

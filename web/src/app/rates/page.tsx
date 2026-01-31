@@ -46,6 +46,8 @@ export default function RateManagementPage() {
   const [isLaneModalOpen, setIsLaneModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<RateProfile | null>(null);
   const [editingLane, setEditingLane] = useState<LaneRate | null>(null);
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [driverAssignments, setDriverAssignments] = useState<Record<string, string>>({});
 
   const [profileForm, setProfileForm] = useState({
     profile_name: '',
@@ -100,6 +102,21 @@ export default function RateManagementPage() {
       
       if (lanesError) throw lanesError;
       setLaneRates(lanes || []);
+
+      const { data: driverData, error: driversError } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('is_active', true)
+        .order('last_name', { ascending: true });
+      if (driversError) throw driversError;
+      setDrivers(driverData || []);
+
+      const { data: assignmentData } = await supabase
+        .from('driver_rate_assignments')
+        .select('driver_id, rate_profile_id');
+      const assignmentMap: Record<string, string> = {};
+      (assignmentData || []).forEach((a: any) => { assignmentMap[a.driver_id] = a.rate_profile_id; });
+      setDriverAssignments(assignmentMap);
     } catch (err: any) {
       console.error('Error:', err);
       alert('Error fetching data: ' + err.message);
@@ -243,6 +260,24 @@ export default function RateManagementPage() {
       fetchData();
     } catch (err: any) {
       alert('Error: ' + err.message);
+    }
+  };
+
+  const saveAssignment = async (driverId: string, profileId: string) => {
+    const prev = driverAssignments[driverId];
+    setDriverAssignments(a => ({ ...a, [driverId]: profileId }));
+    try {
+      if (profileId === '') {
+        await supabase.from('driver_rate_assignments').delete().eq('driver_id', driverId);
+      } else {
+        const { error } = await supabase
+          .from('driver_rate_assignments')
+          .upsert({ driver_id: driverId, rate_profile_id: profileId }, { onConflict: 'driver_id' });
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      setDriverAssignments(a => prev ? { ...a, [driverId]: prev } : (() => { const n = { ...a }; delete n[driverId]; return n; })());
+      alert('Error saving assignment: ' + err.message);
     }
   };
 
@@ -479,16 +514,75 @@ export default function RateManagementPage() {
 
           {/* Driver Assignments Tab */}
           {activeTab === 'assignments' && (
-            <div className="text-center py-12 text-gray-500">
-              <div className="text-6xl mb-4">📋</div>
-              <p className="text-lg font-medium">Driver Rate Assignments</p>
-              <p className="text-sm mt-2">
-                Assign rate profiles to individual drivers from the Drivers page.
-              </p>
-              <a href="/drivers" className="text-blue-600 hover:underline mt-4 inline-block">
-                Go to Drivers →
-              </a>
-            </div>
+            <>
+              <div className="flex justify-between items-center mb-4">
+                <p className="text-gray-600">Assign pay profiles to individual drivers</p>
+                <span className="text-sm text-gray-500">{drivers.length} active drivers</span>
+              </div>
+
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                </div>
+              ) : drivers.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No active drivers found. <a href="/drivers" className="text-blue-600 hover:underline">Add drivers →</a>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Driver</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CDL</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate Profile</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {drivers.map((driver: any) => {
+                        const assignedProfileId = driverAssignments[driver.id] || '';
+                        const assignedProfile = rateProfiles.find(p => p.id === assignedProfileId);
+                        return (
+                          <tr key={driver.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <span className="font-medium">{driver.first_name} {driver.last_name}</span>
+                            </td>
+                            <td className="px-4 py-3 font-mono text-sm text-gray-600">{driver.cdl_number || '-'}</td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs px-2 py-1 rounded ${getDriverTypeColor(driver.driver_type || '')}`}>
+                                {(driver.driver_type || 'N/A').replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <select
+                                value={assignedProfileId}
+                                onChange={e => saveAssignment(driver.id, e.target.value)}
+                                className="px-3 py-2 border rounded-lg text-sm w-full max-w-xs"
+                              >
+                                <option value="">— No profile —</option>
+                                {rateProfiles.map(p => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.profile_name} ({getPayMethodLabel(p.pay_method)})
+                                  </option>
+                                ))}
+                              </select>
+                              {assignedProfile && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {assignedProfile.pay_method === 'PERCENTAGE'
+                                    ? `${assignedProfile.default_percentage}% of gross`
+                                    : `$${assignedProfile.default_rate?.toFixed(2)}${assignedProfile.pay_method === 'PER_MILE' ? '/mi' : '/load'}`}
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

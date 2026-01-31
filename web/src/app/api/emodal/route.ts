@@ -13,18 +13,19 @@ const supabase = createClient(
 // eModal API Configuration
 const EMODAL_CONFIG = {
   dataServicesUrl: 'https://apidocs.eds.emodal.com',
-  propassUrl: 'https://propassagapi.emodal.com/api',
+  propassUrl: 'https://propassapi.emodal.com/api',
 };
 
 // Get API key from database settings
 async function getApiKey(): Promise<string> {
   const { data } = await supabase
     .from('emodal_config')
-    .select('api_key_encrypted')
+    .select('api_key')
+    .eq('is_active', true)
     .limit(1)
     .single();
-  
-  return data?.api_key_encrypted || '';
+
+  return data?.api_key || '';
 }
 
 // Fetch with eModal authentication
@@ -100,20 +101,9 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: 'container required' }, { status: 400 });
         }
         
-        // Try ProPass API for container status
         const url = `${EMODAL_CONFIG.propassUrl}/appointments/container/${containerNumber}`;
-        try {
-          const data = await fetchEmodal(url, apiKey);
-          return NextResponse.json(mapContainerResponse(data));
-        } catch (error) {
-          // Return mock data if API fails (for development)
-          return NextResponse.json({
-            container_number: containerNumber,
-            status: 'UNKNOWN',
-            availability: 'UNKNOWN',
-            message: 'Unable to fetch from eModal. Check API credentials.',
-          });
-        }
+        const data = await fetchEmodal(url, apiKey);
+        return NextResponse.json(mapContainerResponse(data));
       }
 
       case 'slots': {
