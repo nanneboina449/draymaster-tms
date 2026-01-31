@@ -21,7 +21,7 @@ interface Customer {
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,9 +40,9 @@ export default function CustomersPage() {
       const { data, error } = await supabase.from('customers').select('*').order('name');
       if (error) throw error;
       setCustomers(data || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err);
-      setError(parseError(err));
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -54,16 +54,16 @@ export default function CustomersPage() {
       if (editingCustomer) {
         const { error } = await supabase.from('customers').update(payload).eq('id', editingCustomer.id);
         if (error) throw error;
-        showToast('Customer updated successfully', 'success');
+        showToast.success('Customer updated successfully');
       } else {
         const { error } = await supabase.from('customers').insert(payload);
         if (error) throw error;
-        showToast('Customer created successfully', 'success');
+        showToast.success('Customer created successfully');
       }
       await fetchCustomers();
       closeModal();
     } catch (err: any) {
-      showToast(parseError(err), 'error');
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -72,10 +72,10 @@ export default function CustomersPage() {
     try {
       const { error } = await supabase.from('customers').delete().eq('id', id);
       if (error) throw error;
-      showToast('Customer deleted successfully', 'success');
+      showToast.success('Customer deleted successfully');
       await fetchCustomers();
     } catch (err: any) {
-      showToast(parseError(err), 'error');
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -134,7 +134,7 @@ export default function CustomersPage() {
 
       {error && (
         <ErrorAlert
-          message={error}
+          error={error}
           onRetry={fetchCustomers}
         />
       )}
@@ -144,9 +144,8 @@ export default function CustomersPage() {
       ) : filteredCustomers.length === 0 ? (
         <EmptyState
           title="No customers found"
-          message={searchTerm ? "Try adjusting your search terms" : "Get started by adding your first customer"}
-          actionLabel={!searchTerm ? "Add Customer" : undefined}
-          onAction={!searchTerm ? () => openModal() : undefined}
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by adding your first customer"}
+          action={!searchTerm ? { label: "Add Customer", onClick: () => openModal() } : undefined}
         />
       ) : (
         <div className="bg-white rounded-xl shadow overflow-hidden">

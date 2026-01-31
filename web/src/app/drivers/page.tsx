@@ -8,7 +8,7 @@ import { ErrorAlert, EmptyState, parseError, showToast } from '../../components/
 export default function DriversPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [formData, setFormData] = useState({
@@ -26,9 +26,9 @@ export default function DriversPage() {
       setError(null);
       const data = await getDrivers();
       setDrivers(data || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err);
-      setError(parseError(err));
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -38,15 +38,15 @@ export default function DriversPage() {
     try {
       if (editingDriver) {
         await updateDriver(editingDriver.id, formData);
-        showToast('Driver updated successfully', 'success');
+        showToast.success('Driver updated successfully');
       } else {
         await createDriver(formData);
-        showToast('Driver created successfully', 'success');
+        showToast.success('Driver created successfully');
       }
       await fetchDrivers();
       closeModal();
     } catch (err: any) {
-      showToast(parseError(err), 'error');
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -54,20 +54,20 @@ export default function DriversPage() {
     if (!confirm('Delete this driver?')) return;
     try {
       await deleteDriver(id);
-      showToast('Driver deleted successfully', 'success');
+      showToast.success('Driver deleted successfully');
       await fetchDrivers();
     } catch (err: any) {
-      showToast(parseError(err), 'error');
+      showToast.error(parseError(err).message);
     }
   };
 
   const handleStatusChange = async (id: string, status: string) => {
     try {
       await updateDriverStatus(id, status);
-      showToast('Status updated', 'success');
+      showToast.success('Status updated');
       await fetchDrivers();
     } catch (err: any) {
-      showToast(parseError(err), 'error');
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -155,7 +155,7 @@ export default function DriversPage() {
       )}
 
       {error && (
-        <ErrorAlert message={error} onRetry={fetchDrivers} />
+        <ErrorAlert error={error} onRetry={fetchDrivers} />
       )}
 
       {loading ? (
@@ -163,9 +163,8 @@ export default function DriversPage() {
       ) : drivers.length === 0 ? (
         <EmptyState
           title="No drivers found"
-          message="Get started by adding your first driver"
-          actionLabel="Add Driver"
-          onAction={() => openModal()}
+          description="Get started by adding your first driver"
+          action={{ label: "Add Driver", onClick: () => openModal() }}
         />
       ) : (
         <div className="bg-white rounded-xl shadow overflow-hidden">
