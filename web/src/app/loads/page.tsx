@@ -335,7 +335,7 @@ export default function LoadsPage() {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Container</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Move Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">BOL / Booking</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bill of Lading / Booking</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">LFD</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cutoff</th>
@@ -487,9 +487,9 @@ export default function LoadsPage() {
                     <div className="font-semibold">{selectedLoad.terminal_name || '-'}</div>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-4">
-                    <div className="text-sm text-gray-500">BOL / Booking</div>
+                    <div className="text-sm text-gray-500">Bill of Lading / Booking</div>
                     <div className="font-medium">{selectedLoad.bill_of_lading || '-'}</div>
-                    <div className="text-sm text-gray-600">{selectedLoad.booking_number || '-'}</div>
+                    <div className="text-sm text-gray-600">Booking: {selectedLoad.booking_number || '-'}</div>
                   </div>
                   <div className="bg-gray-50 rounded-lg p-4">
                     <div className="text-sm text-gray-500">Customs Status</div>
