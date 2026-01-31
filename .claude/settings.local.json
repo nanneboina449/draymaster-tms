@@ -15,7 +15,10 @@
       "Bash(go build:*)",
       "Bash(tree:*)",
       "Bash(npx tsc --noEmit)",
-      "Bash(npx next build)"
+      "Bash(npx next build)",
+      "Bash(npm run build:*)",
+      "Bash(npm test:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

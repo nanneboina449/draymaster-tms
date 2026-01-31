@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrayMaster TMS - Market Comparison Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #fff;
+        }
+
+        @media print {
+            body {
+                padding: 20px;
+                font-size: 11pt;
+            }
+            .page-break {
+                page-break-before: always;
+            }
+            h2 {
+                page-break-after: avoid;
+            }
+            table {
+                page-break-inside: avoid;
+            }
+        }
+
+        .header {
+            text-align: center;
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 30px;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #1e40af;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header .subtitle {
+            color: #64748b;
+            font-size: 1.2em;
+        }
+
+        .header .date {
+            color: #94a3b8;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        h2 {
+            color: #1e40af;
+            font-size: 1.5em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        h3 {
+            color: #334155;
+            font-size: 1.2em;
+            margin-top: 25px;
+            margin-bottom: 15px;
+        }
+
+        h4 {
+            color: #475569;
+            font-size: 1.05em;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        .executive-summary {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            border-left: 4px solid #2563eb;
+            padding: 25px;
+            margin: 30px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .executive-summary h3 {
+            margin-top: 0;
+            color: #1e40af;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border: 1px solid #e2e8f0;
+        }
+
+        th {
+            background: #1e40af;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        tr:hover {
+            background: #f1f5f9;
+        }
+
+        .highlight-row {
+            background: #dbeafe !important;
+            font-weight: 600;
+        }
+
+        .feature-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .feature-card h4 {
+            color: #1e40af;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .feature-card .badge {
+            background: #22c55e;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+
+        .feature-card p {
+            margin-bottom: 10px;
+        }
+
+        .feature-card .why-matters {
+            background: #fef3c7;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .feature-card .why-matters strong {
+            color: #92400e;
+        }
+
+        ul {
+            margin: 15px 0;
+            padding-left: 25px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .gap-table td:first-child {
+            font-weight: 600;
+        }
+
+        .impact-high {
+            color: #dc2626;
+            font-weight: bold;
+        }
+
+        .impact-medium {
+            color: #d97706;
+            font-weight: bold;
+        }
+
+        .impact-low {
+            color: #16a34a;
+        }
+
+        .value-prop {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .value-prop blockquote {
+            font-size: 1.2em;
+            font-style: italic;
+            margin: 0;
+            line-height: 1.8;
+        }
+
+        .recommendations {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        .recommendations h4 {
+            color: #166534;
+            margin-top: 0;
+        }
+
+        .recommendations ol {
+            padding-left: 20px;
+        }
+
+        .recommendations li {
+            margin-bottom: 15px;
+        }
+
+        .recommendations li strong {
+            color: #166534;
+        }
+
+        .check {
+            color: #22c55e;
+        }
+
+        .partial {
+            color: #f59e0b;
+        }
+
+        .no {
+            color: #ef4444;
+        }
+
+        .pricing-note {
+            background: #fef2f2;
+            border-left: 4px solid #ef4444;
+            padding: 15px 20px;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        .footer {
+            margin-top: 60px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.85em;
+        }
+
+        .toc {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 30px 0;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+            color: #1e40af;
+        }
+
+        .toc ol {
+            columns: 2;
+            column-gap: 40px;
+        }
+
+        .toc li {
+            margin-bottom: 8px;
+        }
+
+        .toc a {
+            color: #334155;
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            color: #2563eb;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>DrayMaster TMS</h1>
+        <div class="subtitle">Market Comparison Analysis</div>
+        <div class="date">January 2026</div>
+    </div>
+
+    <div class="toc">
+        <h3>Table of Contents</h3>
+        <ol>
+            <li><a href="#executive-summary">Executive Summary</a></li>
+            <li><a href="#market-landscape">Market Landscape</a></li>
+            <li><a href="#feature-comparison">Feature Comparison Matrix</a></li>
+            <li><a href="#differentiators">Differentiating Features</a></li>
+            <li><a href="#feature-gaps">Feature Gaps Analysis</a></li>
+            <li><a href="#positioning">Market Positioning</a></li>
+            <li><a href="#pricing">Competitive Pricing Context</a></li>
+            <li><a href="#recommendations">Strategic Recommendations</a></li>
+        </ol>
+    </div>
+
+    <div class="executive-summary" id="executive-summary">
+        <h3>Executive Summary</h3>
+        <p>DrayMaster TMS is a modern, microservices-based Transportation Management System specifically designed for intermodal container drayage operations. Unlike legacy TMS platforms that rely on monolithic architectures, DrayMaster leverages cloud-native technologies including gRPC, Kafka event streaming, and TimescaleDB for superior performance and scalability.</p>
+        <p><strong>Key Finding:</strong> DrayMaster's technical architecture and native eModal integration position it as a compelling alternative to both enterprise solutions (at lower cost) and mid-market options (with superior capabilities).</p>
+    </div>
+
+    <h2 id="market-landscape">Market Landscape</h2>
+    <p>The drayage TMS market is served by a mix of general-purpose logistics platforms and specialized drayage solutions. Below are the major competitors:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Vendor</th>
+                <th>Focus</th>
+                <th>Pricing Model</th>
+                <th>Target Market</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Trucker Tools</strong></td>
+                <td>Drayage + OTR</td>
+                <td>Per-transaction</td>
+                <td>Mid-large carriers</td>
+            </tr>
+            <tr>
+                <td><strong>Revenova (Dray360)</strong></td>
+                <td>Pure drayage</td>
+                <td>Subscription</td>
+                <td>Drayage-specific</td>
+            </tr>
+            <tr>
+                <td><strong>Transflo</strong></td>
+                <td>Document/load management</td>
+                <td>Per-driver/month</td>
+                <td>All trucking</td>
+            </tr>
+            <tr>
+                <td><strong>McLeod LoadMaster</strong></td>
+                <td>Full TMS</td>
+                <td>Enterprise license</td>
+                <td>Large carriers</td>
+            </tr>
+            <tr>
+                <td><strong>Axon TMS</strong></td>
+                <td>Intermodal</td>
+                <td>Subscription</td>
+                <td>Mid-market</td>
+            </tr>
+            <tr>
+                <td><strong>Profittools</strong></td>
+                <td>Drayage</td>
+                <td>Subscription</td>
+                <td>SMB drayage</td>
+            </tr>
+            <tr>
+                <td><strong>e2open/BluJay</strong></td>
+                <td>Global logistics</td>
+                <td>Enterprise</td>
+                <td>Enterprise shippers</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 id="feature-comparison">Feature Comparison Matrix</h2>
+    <p>The following matrix compares DrayMaster's capabilities against key competitors across critical TMS functionality:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Feature</th>
+                <th>DrayMaster</th>
+                <th>Trucker Tools</th>
+                <th>Revenova</th>
+                <th>McLeod</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Container Tracking</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+            </tr>
+            <tr>
+                <td>eModal Integration</td>
+                <td><strong>Native</strong></td>
+                <td>Plugin</td>
+                <td>Native</td>
+                <td>Plugin</td>
+            </tr>
+            <tr>
+                <td>HOS Compliance</td>
+                <td><strong>Full</strong></td>
+                <td>Full</td>
+                <td>Partial</td>
+                <td>Full</td>
+            </tr>
+            <tr>
+                <td>Real-time GPS</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+                <td class="check">&#10004;</td>
+            </tr>
+            <tr class="highlight-row">
+                <td>Street Turn Matching</td>
+                <td><strong>Auto-match</strong></td>
+                <td>Manual</td>
+                <td>Auto-match</td>
+                <td>Manual</td>
+            </tr>
+            <tr>
+                <td>Geofencing</td>
+                <td><strong>Native</strong></td>
+                <td class="check">&#10004;</td>
+                <td>Partial</td>
+                <td class="check">&#10004;</td>
+            </tr>
+            <tr>
+                <td>Driver Settlement</td>
+                <td><strong>Full</strong></td>
+                <td>Partial</td>
+                <td>Full</td>
+                <td>Full</td>
+            </tr>
+            <tr class="highlight-row">
+                <td>Microservices Architecture</td>
+                <td class="check"><strong>&#10004;</strong></td>
+                <td class="no">&#10008;</td>
+                <td class="no">&#10008;</td>
+                <td class="no">&#10008;</td>
+            </tr>
+            <tr class="highlight-row">
+                <td>API-First Design</td>
+                <td><strong>gRPC+REST</strong></td>
+                <td>REST</td>
+                <td>REST</td>
+                <td>Proprietary</td>
+            </tr>
+            <tr>
+                <td>Terminal Appointments</td>
+                <td><strong>Native</strong></td>
+                <td>Integration</td>
+                <td>Native</td>
+                <td>Integration</td>
+            </tr>
+            <tr>
+                <td>Exception Management</td>
+                <td><strong>Full</strong></td>
+                <td>Partial</td>
+                <td>Full</td>
+                <td>Full</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="page-break"></div>
+
+    <h2 id="differentiators">DrayMaster Differentiating Features</h2>
+
+    <div class="feature-card">
+        <h4>1. Modern Cloud-Native Architecture <span class="badge">Competitive Advantage</span></h4>
+        <ul>
+            <li><strong>Microservices design</strong> - Most competitors use monolithic architectures built 10-20 years ago</li>
+            <li><strong>gRPC + REST APIs</strong> - High-performance, type-safe integrations with auto-generated client libraries</li>
+            <li><strong>Event-driven (Kafka)</strong> - Real-time updates vs. polling-based competitors</li>
+            <li><strong>TimescaleDB for tracking</strong> - Optimized time-series data handling for GPS/location data</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> Enables faster feature development, better scalability, and easier third-party integrations. Lower technical debt means faster time-to-market for new capabilities.
+        </div>
+    </div>
+
+    <div class="feature-card">
+        <h4>2. Native eModal Integration <span class="badge">Competitive Advantage</span></h4>
+        <ul>
+            <li>Direct EDS API integration for container data</li>
+            <li>Azure Service Bus real-time event consumption</li>
+            <li>Auto-sync container availability and customs status</li>
+            <li>Auto-publishing new containers to eModal</li>
+            <li>Real-time hold status tracking (USDA, TMF, Freight)</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> Many competitors require third-party middleware or manual data entry for port/terminal data. Native integration reduces errors and provides faster visibility.
+        </div>
+    </div>
+
+    <div class="feature-card">
+        <h4>3. Intelligent Street Turn Matching <span class="badge">Revenue Driver</span></h4>
+        <ul>
+            <li>Automated import/export pairing algorithms</li>
+            <li>Same-terminal and cross-terminal matching</li>
+            <li>Customs status verification (must be RELEASED)</li>
+            <li>LFD constraint validation</li>
+            <li>Container size compatibility checking</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> Street turns reduce empty miles by 40-60% and eliminate chassis pool fees ($30-50/day). Few competitors offer automated matching - most require manual identification.
+        </div>
+    </div>
+
+    <div class="feature-card">
+        <h4>4. Comprehensive HOS Management</h4>
+        <ul>
+            <li>Full FMCSA compliance tracking (11-hour drive, 14-hour duty, 70-hour cycle)</li>
+            <li>Real-time violation detection with alerts</li>
+            <li>30-minute break requirement monitoring</li>
+            <li>Document expiry tracking (CDL, TWIC, Medical Card, Hazmat)</li>
+            <li>Compliance alert dashboard with severity levels</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> While many drayage operations fall within 150-mile HOS exemption, carriers with mixed operations or regulatory audits benefit from comprehensive tracking.
+        </div>
+    </div>
+
+    <div class="feature-card">
+        <h4>5. Advanced Exception Handling</h4>
+        <ul>
+            <li>15+ exception types (terminal closed, customs hold, chassis unavailable, etc.)</li>
+            <li>Severity-based prioritization (LOW, MEDIUM, HIGH, CRITICAL)</li>
+            <li>Financial impact tracking per exception</li>
+            <li>Full audit trail with comments and history</li>
+            <li>Estimated vs. actual delay tracking</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> Drayage has high exception rates due to terminal delays, customs holds, and chassis shortages. Proactive exception management differentiates service quality and reduces detention costs.
+        </div>
+    </div>
+
+    <div class="feature-card">
+        <h4>6. Flexible Rate Management</h4>
+        <ul>
+            <li>Per-mile, per-load, and percentage-based compensation</li>
+            <li>Lane-specific rates (origin-destination pricing)</li>
+            <li>Driver-type profiles (company driver, lease, owner-operator)</li>
+            <li>Hazmat and overweight pay premiums</li>
+            <li>Weekend and waiting time differentials</li>
+            <li>Customizable deductions (insurance, lease payments)</li>
+        </ul>
+        <div class="why-matters">
+            <strong>Why it matters:</strong> Drayage compensation is complex with multiple pay structures. DrayMaster's flexibility supports diverse driver arrangements without workarounds.
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+
+    <h2 id="feature-gaps">Feature Gaps vs. Enterprise Competitors</h2>
+    <p>The following features are available in some competitors but not yet implemented in DrayMaster:</p>
+
+    <table class="gap-table">
+        <thead>
+            <tr>
+                <th>Missing Feature</th>
+                <th>Impact</th>
+                <th>Competitors That Have It</th>
+                <th>Priority</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Driver Mobile App</td>
+                <td class="impact-high">HIGH</td>
+                <td>Trucker Tools, Transflo, Samsara</td>
+                <td>P1</td>
+            </tr>
+            <tr>
+                <td>Customer Portal</td>
+                <td class="impact-medium">MEDIUM</td>
+                <td>Most competitors</td>
+                <td>P1</td>
+            </tr>
+            <tr>
+                <td>EDI 204/214/990</td>
+                <td class="impact-medium">MEDIUM</td>
+                <td>McLeod, Axon, e2open</td>
+                <td>P2</td>
+            </tr>
+            <tr>
+                <td>Fuel Card Integration</td>
+                <td class="impact-medium">MEDIUM</td>
+                <td>Transflo, McLeod</td>
+                <td>P2</td>
+            </tr>
+            <tr>
+                <td>Load Board Integration</td>
+                <td class="impact-low">LOW</td>
+                <td>Trucker Tools, DAT</td>
+                <td>P3</td>
+            </tr>
+            <tr>
+                <td>Route Optimization AI</td>
+                <td class="impact-medium">MEDIUM</td>
+                <td>Project44, FourKites</td>
+                <td>P3</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 id="positioning">Market Positioning</h2>
+
+    <h3>Ideal Target Market</h3>
+    <ul>
+        <li><strong>Company Size:</strong> Mid-sized drayage carriers (20-200 power units)</li>
+        <li><strong>Geography:</strong> Port-centric operations (LA/Long Beach, NY/NJ, Savannah, Houston, Oakland)</li>
+        <li><strong>Technical Needs:</strong> Companies requiring eModal integration and modern API capabilities</li>
+        <li><strong>Budget:</strong> Organizations seeking enterprise functionality without enterprise pricing</li>
+    </ul>
+
+    <div class="value-prop">
+        <blockquote>
+            "The only drayage TMS built on modern cloud-native architecture with native eModal integration, intelligent street turn matching, and comprehensive HOS compliance &mdash; at mid-market pricing."
+        </blockquote>
+    </div>
+
+    <h2 id="pricing">Competitive Pricing Context</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>TMS Tier</th>
+                <th>Example Vendors</th>
+                <th>Monthly Cost (50 trucks)</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Enterprise</strong></td>
+                <td>McLeod, TMW, e2open</td>
+                <td>$5,000 - $15,000+</td>
+                <td>Plus implementation fees ($50K-200K)</td>
+            </tr>
+            <tr>
+                <td><strong>Mid-Market</strong></td>
+                <td>Axon, Revenova</td>
+                <td>$1,500 - $4,000</td>
+                <td>Per-truck pricing typical</td>
+            </tr>
+            <tr>
+                <td><strong>SMB</strong></td>
+                <td>Profittools, Rose Rocket</td>
+                <td>$500 - $1,500</td>
+                <td>Limited feature sets</td>
+            </tr>
+            <tr class="highlight-row">
+                <td><strong>DrayMaster</strong></td>
+                <td>-</td>
+                <td><em>TBD</em></td>
+                <td>Modern architecture advantage</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="pricing-note">
+        <strong>Pricing Strategy Recommendation:</strong> Position at the upper end of mid-market pricing ($2,500-$4,000/month for 50 trucks) to reflect enterprise-grade architecture while undercutting legacy enterprise solutions.
+    </div>
+
+    <div class="page-break"></div>
+
+    <h2 id="recommendations">Strategic Recommendations</h2>
+
+    <div class="recommendations">
+        <h4>Priority Development Roadmap</h4>
+        <ol>
+            <li>
+                <strong>Driver Mobile App (P1)</strong><br>
+                The #1 missing feature for field operations. Enables real-time milestone capture, POD collection, and driver communication. Competitors use this as their primary sales differentiator.
+            </li>
+            <li>
+                <strong>Customer Portal (P1)</strong><br>
+                Self-service tracking portal reduces support calls by 40-60% and is table stakes for enterprise customers. Include shipment visibility, document access, and appointment scheduling.
+            </li>
+            <li>
+                <strong>EDI Capabilities (P2)</strong><br>
+                Required for enterprise shipper integration. Prioritize EDI 204 (Load Tender), 214 (Shipment Status), and 990 (Appointment Response) for intermodal customers.
+            </li>
+            <li>
+                <strong>Fuel Card Integration (P2)</strong><br>
+                Partner with major fuel card providers (Comdata, EFS, WEX) for automated fuel purchase capture and IFTA reporting.
+            </li>
+            <li>
+                <strong>Route Optimization (P3)</strong><br>
+                AI-powered route optimization for multi-stop drayage moves. Can leverage existing geofence and tracking infrastructure.
+            </li>
+        </ol>
+    </div>
+
+    <h3>Go-to-Market Recommendations</h3>
+
+    <h4>1. Lead with Architecture Story</h4>
+    <p>DrayMaster's microservices architecture is genuinely rare in the TMS market. Most competitors are 15-20 year old monolithic applications. Emphasize:</p>
+    <ul>
+        <li>Faster feature delivery and customization</li>
+        <li>Better reliability through service isolation</li>
+        <li>Superior integration capabilities via modern APIs</li>
+        <li>Lower total cost of ownership vs. legacy systems</li>
+    </ul>
+
+    <h4>2. Quantify Street Turn Value</h4>
+    <p>Build an ROI calculator showing:</p>
+    <ul>
+        <li>Empty mile reduction (typically 40-60%)</li>
+        <li>Chassis pool fee savings ($30-50/day per turn)</li>
+        <li>Environmental benefits (CO2 reduction)</li>
+        <li>Driver utilization improvement</li>
+    </ul>
+
+    <h4>3. Target eModal-Heavy Markets First</h4>
+    <p>Focus initial sales efforts on ports with strong eModal adoption:</p>
+    <ul>
+        <li>Los Angeles / Long Beach</li>
+        <li>New York / New Jersey</li>
+        <li>Savannah</li>
+        <li>Houston</li>
+    </ul>
+
+    <h4>4. Partner Strategy</h4>
+    <p>Consider integration partnerships with:</p>
+    <ul>
+        <li>ELD providers (Samsara, KeepTruckin) for HOS data</li>
+        <li>Fuel card companies for automated IFTA</li>
+        <li>Factoring companies for accelerated receivables</li>
+        <li>Accounting systems (QuickBooks, Sage) for financial integration</li>
+    </ul>
+
+    <div class="footer">
+        <p><strong>DrayMaster TMS</strong> | Market Comparison Analysis</p>
+        <p>Prepared January 2026 | Confidential</p>
+    </div>
+</body>
+</html>

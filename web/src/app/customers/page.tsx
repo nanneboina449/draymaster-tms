@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SkeletonTable, SkeletonCard } from '../../components/ui/LoadingState';
+import { ErrorAlert, EmptyState, parseError, showToast } from '../../components/ui/ErrorState';
 
 interface Customer {
   id: string;
@@ -19,6 +21,7 @@ interface Customer {
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,11 +36,13 @@ export default function CustomersPage() {
   const fetchCustomers = async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data, error } = await supabase.from('customers').select('*').order('name');
       if (error) throw error;
       setCustomers(data || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -49,14 +54,16 @@ export default function CustomersPage() {
       if (editingCustomer) {
         const { error } = await supabase.from('customers').update(payload).eq('id', editingCustomer.id);
         if (error) throw error;
+        showToast.success('Customer updated successfully');
       } else {
         const { error } = await supabase.from('customers').insert(payload);
         if (error) throw error;
+        showToast.success('Customer created successfully');
       }
       await fetchCustomers();
       closeModal();
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -65,9 +72,10 @@ export default function CustomersPage() {
     try {
       const { error } = await supabase.from('customers').delete().eq('id', id);
       if (error) throw error;
+      showToast.success('Customer deleted successfully');
       await fetchCustomers();
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast.error(parseError(err).message);
     }
   };
 
@@ -106,18 +114,39 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Total</p><p className="text-2xl font-bold">{customers.length}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Active</p><p className="text-2xl font-bold text-green-600">{customers.filter(c => c.is_active).length}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Inactive</p><p className="text-2xl font-bold text-gray-600">{customers.filter(c => !c.is_active).length}</p></div>
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-3 gap-4">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Total</p><p className="text-2xl font-bold">{customers.length}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Active</p><p className="text-2xl font-bold text-green-600">{customers.filter(c => c.is_active).length}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Inactive</p><p className="text-2xl font-bold text-gray-600">{customers.filter(c => !c.is_active).length}</p></div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow p-4">
         <input type="text" placeholder="Search customers..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
       </div>
 
+      {error && (
+        <ErrorAlert
+          error={error}
+          onRetry={fetchCustomers}
+        />
+      )}
+
       {loading ? (
-        <div className="bg-white rounded-xl shadow p-12 text-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div></div>
+        <SkeletonTable rows={5} columns={7} />
+      ) : filteredCustomers.length === 0 ? (
+        <EmptyState
+          title="No customers found"
+          description={searchTerm ? "Try adjusting your search terms" : "Get started by adding your first customer"}
+          action={!searchTerm ? { label: "Add Customer", onClick: () => openModal() } : undefined}
+        />
       ) : (
         <div className="bg-white rounded-xl shadow overflow-hidden">
           <table className="w-full">
@@ -147,7 +176,6 @@ export default function CustomersPage() {
                   </td>
                 </tr>
               ))}
-              {filteredCustomers.length === 0 && <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500">No customers found</td></tr>}
             </tbody>
           </table>
         </div>

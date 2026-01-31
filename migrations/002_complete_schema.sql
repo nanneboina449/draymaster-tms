@@ -9,18 +9,20 @@
 --   1  Extensions & utility functions
 --   2  Enum types
 --   3  Core reference tables
---   4  Order-service tables
+--   4  Order-service tables (shipments, containers, orders, loads, street_turns)
 --   5  Driver-service tables
---   6  Equipment-service tables
---   7  Dispatch-service tables
+--   6  Equipment-service tables (+ yard_inventory)
+--   7  Dispatch-service tables (trips, trip_stops, trip_legs)
 --   8  Appointment & exception tables
---   9  eModal-integration tables
---  10  Billing-service tables
+--   9  eModal-integration tables (+ container_tracking)
+--  10  Billing-service & rate tables (+ driver_rate_profiles, lane_rates)
 --  11  Tracking-service tables
---  12  Indexes
---  13  Triggers (updated_at)
---  14  Views
---  15  Seed data
+--  12  Admin tables (company_settings, notifications)
+--  13  Column-safety (ALTER for pre-existing DBs)
+--  14  Indexes
+--  15  Triggers (updated_at)
+--  16  Views
+--  17  Seed data
 -- ==============================================================================
 
 -- ==============================================================================
@@ -47,10 +49,10 @@ $$ LANGUAGE plpgsql;
 DO $$ BEGIN CREATE TYPE shipment_type       AS ENUM ('IMPORT','EXPORT');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN CREATE TYPE shipment_status     AS ENUM ('PENDING','IN_PROGRESS','COMPLETED','CANCELLED');
+DO $$ BEGIN CREATE TYPE shipment_status     AS ENUM ('PENDING','CONFIRMED','IN_PROGRESS','DELIVERED','COMPLETED','CANCELLED');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN CREATE TYPE container_size      AS ENUM ('20','40','45');
+DO $$ BEGIN CREATE TYPE container_size      AS ENUM ('20','40','40HC','45');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN CREATE TYPE container_type      AS ENUM ('DRY','HIGH_CUBE','REEFER','TANK','FLAT_RACK','OPEN_TOP');
@@ -119,11 +121,11 @@ DO $$ BEGIN CREATE TYPE exception_status    AS ENUM (
     'OPEN','ACKNOWLEDGED','IN_PROGRESS','RESOLVED','CLOSED','CANCELLED');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- Add CANCELLED to stop_status if the type was created without it (pre-existing DB)
-DO $$
-BEGIN
-    ALTER TYPE stop_status ADD VALUE IF NOT EXISTS 'CANCELLED';
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Extend enums if types already exist without new values (pre-existing DB)
+DO $$ BEGIN ALTER TYPE shipment_status ADD VALUE IF NOT EXISTS 'CONFIRMED';  EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TYPE shipment_status ADD VALUE IF NOT EXISTS 'DELIVERED';  EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TYPE container_size  ADD VALUE IF NOT EXISTS '40HC';       EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TYPE stop_status     ADD VALUE IF NOT EXISTS 'CANCELLED';  EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ==============================================================================
 -- 3. CORE REFERENCE TABLES
@@ -191,10 +193,12 @@ CREATE TABLE IF NOT EXISTS shipments (
     id                        UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
     type                      shipment_type   NOT NULL,
     reference_number          VARCHAR(100)    NOT NULL,
-    customer_id               UUID            NOT NULL REFERENCES customers(id),
-    steamship_line_id         UUID            NOT NULL REFERENCES steamship_lines(id),
-    port_id                   UUID            NOT NULL REFERENCES ports(id),
-    terminal_id               UUID            NOT NULL REFERENCES locations(id),
+    -- FK columns — nullable so the Loads-page wizard can omit lookup UUIDs
+    customer_id               UUID            REFERENCES customers(id),
+    steamship_line_id         UUID            REFERENCES steamship_lines(id),
+    port_id                   UUID            REFERENCES ports(id),
+    terminal_id               UUID            REFERENCES locations(id),
+    -- Original detail columns
     vessel_name               VARCHAR(255),
     voyage_number             VARCHAR(50),
     vessel_eta                TIMESTAMPTZ,
@@ -209,6 +213,22 @@ CREATE TABLE IF NOT EXISTS shipments (
     empty_pickup_location_id  UUID            REFERENCES locations(id),
     status                    shipment_status NOT NULL DEFAULT 'PENDING',
     special_instructions      TEXT,
+    -- Text columns populated by the Loads-page wizard (when FK UUIDs are not used)
+    customer_name             VARCHAR(255),
+    steamship_line            VARCHAR(255),
+    booking_number            VARCHAR(100),
+    bill_of_lading            VARCHAR(100),
+    vessel                    VARCHAR(255),
+    voyage                    VARCHAR(50),
+    terminal_name             VARCHAR(255),
+    trip_type                 VARCHAR(50),
+    chassis_required          BOOLEAN         DEFAULT TRUE,
+    chassis_pool              VARCHAR(100),
+    chassis_size              VARCHAR(20),
+    delivery_address          VARCHAR(500),
+    delivery_city             VARCHAR(100),
+    delivery_state            VARCHAR(50),
+    delivery_zip              VARCHAR(20),
     created_at                TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at                TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     UNIQUE(steamship_line_id, reference_number)
@@ -261,6 +281,105 @@ CREATE TABLE IF NOT EXISTS orders (
     deleted_at               TIMESTAMPTZ
 );
 
+-- ─── Loads (operational dispatch entity — one row per container assignment) ──
+
+CREATE TABLE IF NOT EXISTS loads (
+    id                         UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    load_number                VARCHAR(30)     UNIQUE NOT NULL,
+    order_id                   UUID            REFERENCES orders(id),
+    customer_id                UUID            NOT NULL REFERENCES customers(id),
+    container_number           VARCHAR(15),
+    container_size             VARCHAR(10),
+    container_type             VARCHAR(20)     DEFAULT 'DRY',
+    weight_lbs                 INTEGER,
+    is_hazmat                  BOOLEAN         DEFAULT FALSE,
+    is_overweight              BOOLEAN         DEFAULT FALSE,
+    requires_triaxle           BOOLEAN         DEFAULT FALSE,
+    move_type                  VARCHAR(20),
+    terminal                   VARCHAR(255),
+    terminal_status            VARCHAR(20),
+    last_free_day              DATE,
+    hold_customs               BOOLEAN         DEFAULT FALSE,
+    hold_freight               BOOLEAN         DEFAULT FALSE,
+    hold_usda                  BOOLEAN         DEFAULT FALSE,
+    hold_tmf                   BOOLEAN         DEFAULT FALSE,
+    in_yard                    BOOLEAN         DEFAULT FALSE,
+    yard_location              VARCHAR(255),
+    yard_in_date               TIMESTAMPTZ,
+    status                     VARCHAR(30)     NOT NULL DEFAULT 'TRACKING',
+    total_charges              DECIMAL(10,2)   DEFAULT 0,
+    invoice_id                 UUID,
+    terminal_appointment_date  DATE,
+    terminal_appointment_time  VARCHAR(10),
+    delivery_appointment_date  DATE,
+    delivery_appointment_time  VARCHAR(10),
+    created_at                 TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at                 TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- ─── Load charges (line-item charges attached to a load) ─────────────────────
+
+CREATE TABLE IF NOT EXISTS load_charges (
+    id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    load_id         UUID            NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
+    charge_type     VARCHAR(30)     NOT NULL,
+    description     VARCHAR(255),
+    quantity        DECIMAL(10,2)   DEFAULT 1,
+    unit_rate       DECIMAL(10,2)   DEFAULT 0,
+    amount          DECIMAL(10,2)   DEFAULT 0,
+    billable_to     VARCHAR(20)     DEFAULT 'CUSTOMER',
+    auto_calculated BOOLEAN         DEFAULT FALSE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- ─── Load notes (internal / customer-visible notes on a load) ────────────────
+
+CREATE TABLE IF NOT EXISTS load_notes (
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    load_id                 UUID        NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
+    author_name             VARCHAR(100) NOT NULL,
+    author_type             VARCHAR(20)  DEFAULT 'INTERNAL',
+    message                 TEXT         NOT NULL,
+    visible_to_customer     BOOLEAN      DEFAULT FALSE,
+    created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- ─── Load activity log (append-only audit trail) ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS load_activity_log (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    load_id         UUID        NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
+    action          VARCHAR(50) NOT NULL,
+    from_value      VARCHAR(100),
+    to_value        VARCHAR(100),
+    details         TEXT,
+    performed_by    VARCHAR(100) DEFAULT 'SYSTEM',
+    performer_type  VARCHAR(20)  DEFAULT 'SYSTEM',
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- ─── Street turns (import→export container reuse) ───────────────────────────
+
+CREATE TABLE IF NOT EXISTS street_turns (
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    street_turn_number      VARCHAR(30),
+    import_shipment_id      UUID        REFERENCES shipments(id),
+    export_shipment_id      UUID        REFERENCES shipments(id),
+    import_load_id          UUID        REFERENCES loads(id),
+    export_load_id          UUID        REFERENCES loads(id),
+    import_container        VARCHAR(15),
+    export_container        VARCHAR(15),
+    container_size          VARCHAR(10),
+    import_terminal         VARCHAR(255),
+    export_terminal         VARCHAR(255),
+    status                  VARCHAR(20) NOT NULL DEFAULT 'POTENTIAL',
+    estimated_savings       DECIMAL(10,2) DEFAULT 0,
+    approved_by             VARCHAR(100),
+    approved_at             TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- 5. DRIVER-SERVICE TABLES
 -- ==============================================================================
@@ -297,6 +416,7 @@ CREATE TABLE IF NOT EXISTS drivers (
     termination_date        TIMESTAMPTZ,
     app_user_id             UUID,
     device_token            VARCHAR(500),
+    is_active               BOOLEAN      DEFAULT TRUE,
     created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
@@ -552,6 +672,22 @@ CREATE TABLE IF NOT EXISTS inspection_defects (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Yard inventory (tracks what's physically in the yard) ──────────────────
+
+CREATE TABLE IF NOT EXISTS yard_inventory (
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    yard_location_id    UUID        REFERENCES locations(id),
+    load_id             UUID        REFERENCES loads(id),
+    on_chassis          BOOLEAN     DEFAULT FALSE,
+    chassis_number      VARCHAR(20),
+    chassis_pool        VARCHAR(50),
+    in_date             TIMESTAMPTZ,
+    out_date            TIMESTAMPTZ,
+    status              VARCHAR(20) DEFAULT 'IN_YARD',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- 7. DISPATCH-SERVICE TABLES
 -- ==============================================================================
@@ -579,6 +715,10 @@ CREATE TABLE IF NOT EXISTS trips (
     is_street_turn         BOOLEAN     DEFAULT FALSE,
     is_dual_transaction    BOOLEAN     DEFAULT FALSE,
     linked_trip_id         UUID        REFERENCES trips(id),
+    load_id                UUID        REFERENCES loads(id),
+    shipment_id            UUID,
+    container_id           UUID        REFERENCES containers(id),
+    chassis_number         VARCHAR(50),
     created_by             VARCHAR(100),
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -620,6 +760,31 @@ CREATE TABLE IF NOT EXISTS trip_stops (
     updated_at             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     deleted_at             TIMESTAMPTZ,
     UNIQUE(trip_id, sequence)
+);
+
+-- ─── Trip legs (multi-leg dispatch routing — pickup/delivery/return segments) ─
+
+CREATE TABLE IF NOT EXISTS trip_legs (
+    id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id               UUID        NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    leg_number            INTEGER     NOT NULL DEFAULT 1,
+    leg_type              VARCHAR(30) NOT NULL,
+    location_type         VARCHAR(30),
+    location_name         VARCHAR(255),
+    location_address      VARCHAR(255),
+    location_city         VARCHAR(100),
+    location_state        VARCHAR(10),
+    location_zip          VARCHAR(10),
+    scheduled_time        TIMESTAMPTZ,
+    actual_arrival        TIMESTAMPTZ,
+    actual_departure      TIMESTAMPTZ,
+    status                VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    waiting_time_minutes  INTEGER     DEFAULT 0,
+    detention_charged     BOOLEAN     DEFAULT FALSE,
+    pod_captured          BOOLEAN     DEFAULT FALSE,
+    notes                 TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS trip_orders (
@@ -800,6 +965,22 @@ CREATE TABLE IF NOT EXISTS gate_fees (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Container tracking (eModal sync cache — container status snapshots) ─────
+
+CREATE TABLE IF NOT EXISTS container_tracking (
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    container_number    VARCHAR(15) UNIQUE NOT NULL,
+    emodal_status       VARCHAR(50),
+    availability_status VARCHAR(30),
+    has_customs_hold    BOOLEAN     DEFAULT FALSE,
+    has_freight_hold    BOOLEAN     DEFAULT FALSE,
+    has_usda_hold       BOOLEAN     DEFAULT FALSE,
+    yard_location       VARCHAR(255),
+    last_checked_at     TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- 10. BILLING-SERVICE TABLES
 -- ==============================================================================
@@ -957,6 +1138,58 @@ CREATE TABLE IF NOT EXISTS driver_pay_rates (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Driver pay rate profiles (pay-structure templates) ──────────────────────
+
+CREATE TABLE IF NOT EXISTS driver_rate_profiles (
+    id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_name                VARCHAR(100) NOT NULL,
+    driver_type                 VARCHAR(30)  DEFAULT 'COMPANY_DRIVER',
+    pay_method                  VARCHAR(20)  DEFAULT 'PER_LOAD',
+    default_rate                DECIMAL(10,2) DEFAULT 0,
+    default_percentage          DECIMAL(5,2) DEFAULT 0,
+    waiting_free_hours          INTEGER      DEFAULT 2,
+    waiting_rate_per_hour       DECIMAL(8,2) DEFAULT 0,
+    stop_pay                    DECIMAL(8,2) DEFAULT 0,
+    free_stops                  INTEGER      DEFAULT 0,
+    hazmat_pay                  DECIMAL(8,2) DEFAULT 0,
+    overweight_pay              DECIMAL(8,2) DEFAULT 0,
+    live_unload_pay             DECIMAL(8,2) DEFAULT 0,
+    weekend_pay                 DECIMAL(8,2) DEFAULT 0,
+    weekly_insurance_deduction  DECIMAL(8,2) DEFAULT 0,
+    weekly_lease_deduction      DECIMAL(8,2) DEFAULT 0,
+    is_active                   BOOLEAN      DEFAULT TRUE,
+    created_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- ─── Lane rates (origin→destination route pricing) ───────────────────────────
+
+CREATE TABLE IF NOT EXISTS lane_rates (
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    origin_type         VARCHAR(30) NOT NULL,
+    origin_value        VARCHAR(100) NOT NULL,
+    destination_type    VARCHAR(30) NOT NULL,
+    destination_value   VARCHAR(100) NOT NULL,
+    flat_rate           DECIMAL(10,2) DEFAULT 0,
+    per_mile_rate       DECIMAL(8,4) DEFAULT 0,
+    estimated_miles     DECIMAL(8,2) DEFAULT 0,
+    minimum_pay         DECIMAL(10,2) DEFAULT 0,
+    is_active           BOOLEAN     DEFAULT TRUE,
+    notes               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ─── Driver rate assignments (profile → driver mapping) ──────────────────────
+
+CREATE TABLE IF NOT EXISTS driver_rate_assignments (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    driver_id       UUID        UNIQUE NOT NULL REFERENCES drivers(id),
+    rate_profile_id UUID        NOT NULL REFERENCES driver_rate_profiles(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- 11. TRACKING-SERVICE TABLES
 -- ==============================================================================
@@ -1009,7 +1242,49 @@ CREATE TABLE IF NOT EXISTS geofences (
 );
 
 -- ==============================================================================
--- 11b. COLUMN SAFETY — backfill columns on pre-existing tables
+-- 12. ADMIN TABLES
+-- ==============================================================================
+
+-- ─── Company settings (singleton row keyed by id = 'default') ────────────────
+
+CREATE TABLE IF NOT EXISTS company_settings (
+    id                      VARCHAR(20) PRIMARY KEY,
+    name                    VARCHAR(255),
+    address                 VARCHAR(500),
+    city                    VARCHAR(100),
+    state                   VARCHAR(50),
+    zip                     VARCHAR(20),
+    phone                   VARCHAR(50),
+    email                   VARCHAR(255),
+    mc_number               VARCHAR(50),
+    dot_number              VARCHAR(50),
+    email_alerts            BOOLEAN DEFAULT TRUE,
+    sms_alerts              BOOLEAN DEFAULT FALSE,
+    dispatch_notifications  BOOLEAN DEFAULT TRUE,
+    delivery_notifications  BOOLEAN DEFAULT TRUE,
+    lfd_reminders           BOOLEAN DEFAULT TRUE,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ─── Notifications (dashboard + channel notifications) ───────────────────────
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    target_type     VARCHAR(50),
+    target_id       VARCHAR(100),
+    recipient_type  VARCHAR(50),
+    title           VARCHAR(255) NOT NULL,
+    message         TEXT,
+    severity        VARCHAR(20) DEFAULT 'MEDIUM',
+    channel         VARCHAR(20) DEFAULT 'DASHBOARD',
+    status          VARCHAR(20) DEFAULT 'PENDING',
+    read_at         TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ==============================================================================
+-- 13. COLUMN SAFETY — backfill columns on pre-existing tables
 -- ==============================================================================
 -- When this file is run against a database that already contains tables from
 -- per-service migrations (order-service, dispatch-service) or 001, those tables
@@ -1020,73 +1295,155 @@ CREATE TABLE IF NOT EXISTS geofences (
 
 DO $$
 BEGIN
-    -- shipments.terminal_id  (order-service always includes it, but guard anyway)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'shipments' AND column_name = 'terminal_id'
-    ) THEN
-        ALTER TABLE shipments ADD COLUMN terminal_id UUID REFERENCES locations(id);
+    -- ── customers ─────────────────────────────────────────────────────────
+    -- Migration 003 renamed customers.name → company_name.  On a pre-existing
+    -- DB the old column name may still be in place; rename it before the seed
+    -- INSERT that references company_name.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'name') THEN
+        ALTER TABLE customers RENAME COLUMN name TO company_name;
     END IF;
 
-    -- orders.deleted_at  (added by 001_production_enhancements)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'orders' AND column_name = 'deleted_at'
-    ) THEN
+    -- ── shipments ─────────────────────────────────────────────────────────
+    -- FK columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'customer_id') THEN
+        ALTER TABLE shipments ADD COLUMN customer_id UUID REFERENCES customers(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'steamship_line_id') THEN
+        ALTER TABLE shipments ADD COLUMN steamship_line_id UUID REFERENCES steamship_lines(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'port_id') THEN
+        ALTER TABLE shipments ADD COLUMN port_id UUID REFERENCES ports(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'terminal_id') THEN
+        ALTER TABLE shipments ADD COLUMN terminal_id UUID REFERENCES locations(id);
+    END IF;
+    -- Wizard text columns (migration 004 §16)
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'shipments' AND column_name = 'customer_name') THEN
+        ALTER TABLE shipments ADD COLUMN customer_name VARCHAR(255);
+        ALTER TABLE shipments ADD COLUMN steamship_line VARCHAR(255);
+        ALTER TABLE shipments ADD COLUMN booking_number VARCHAR(100);
+        ALTER TABLE shipments ADD COLUMN bill_of_lading VARCHAR(100);
+        ALTER TABLE shipments ADD COLUMN vessel VARCHAR(255);
+        ALTER TABLE shipments ADD COLUMN voyage VARCHAR(50);
+        ALTER TABLE shipments ADD COLUMN terminal_name VARCHAR(255);
+        ALTER TABLE shipments ADD COLUMN trip_type VARCHAR(50);
+        ALTER TABLE shipments ADD COLUMN chassis_required BOOLEAN DEFAULT TRUE;
+        ALTER TABLE shipments ADD COLUMN chassis_pool VARCHAR(100);
+        ALTER TABLE shipments ADD COLUMN chassis_size VARCHAR(20);
+        ALTER TABLE shipments ADD COLUMN delivery_address VARCHAR(500);
+        ALTER TABLE shipments ADD COLUMN delivery_city VARCHAR(100);
+        ALTER TABLE shipments ADD COLUMN delivery_state VARCHAR(50);
+        ALTER TABLE shipments ADD COLUMN delivery_zip VARCHAR(20);
+    END IF;
+
+    -- ── orders ────────────────────────────────────────────────────────────
+    -- Columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'container_id') THEN
+        ALTER TABLE orders ADD COLUMN container_id UUID REFERENCES containers(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'shipment_id') THEN
+        ALTER TABLE orders ADD COLUMN shipment_id UUID REFERENCES shipments(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'status') THEN
+        ALTER TABLE orders ADD COLUMN status order_status NOT NULL DEFAULT 'PENDING';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'type') THEN
+        ALTER TABLE orders ADD COLUMN type order_type NOT NULL DEFAULT 'IMPORT';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'billing_status') THEN
+        ALTER TABLE orders ADD COLUMN billing_status billing_status NOT NULL DEFAULT 'UNBILLED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'requested_pickup_date') THEN
+        ALTER TABLE orders ADD COLUMN requested_pickup_date TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'requested_delivery_date') THEN
+        ALTER TABLE orders ADD COLUMN requested_delivery_date TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' AND column_name = 'deleted_at') THEN
         ALTER TABLE orders ADD COLUMN deleted_at TIMESTAMPTZ;
     END IF;
 
-    -- trips.revenue  (added by 001_production_enhancements)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'trips' AND column_name = 'revenue'
-    ) THEN
+    -- ── containers ────────────────────────────────────────────────────────
+    -- Columns that may be missing if table was created by an older migration
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_state') THEN
+        ALTER TABLE containers ADD COLUMN current_state container_state NOT NULL DEFAULT 'LOADED';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_location_type') THEN
+        ALTER TABLE containers ADD COLUMN current_location_type location_type NOT NULL DEFAULT 'VESSEL';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'current_location_id') THEN
+        ALTER TABLE containers ADD COLUMN current_location_id UUID REFERENCES locations(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'containers' AND column_name = 'customs_status') THEN
+        ALTER TABLE containers ADD COLUMN customs_status customs_status NOT NULL DEFAULT 'PENDING';
+    END IF;
+
+    -- ── drivers ───────────────────────────────────────────────────────────
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'drivers' AND column_name = 'is_active') THEN
+        ALTER TABLE drivers ADD COLUMN is_active BOOLEAN DEFAULT TRUE;
+        UPDATE drivers SET is_active = (status IN ('AVAILABLE', 'ACTIVE', 'ON_DUTY'));
+    END IF;
+
+    -- ── trips ─────────────────────────────────────────────────────────────
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'revenue') THEN
         ALTER TABLE trips ADD COLUMN revenue DECIMAL(10,2) DEFAULT 0;
     END IF;
-
-    -- trips.cost  (added by 001_production_enhancements)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'trips' AND column_name = 'cost'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'cost') THEN
         ALTER TABLE trips ADD COLUMN cost DECIMAL(10,2) DEFAULT 0;
     END IF;
-
-    -- trips.deleted_at  (added by 001_production_enhancements)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'trips' AND column_name = 'deleted_at'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'deleted_at') THEN
         ALTER TABLE trips ADD COLUMN deleted_at TIMESTAMPTZ;
     END IF;
-
-    -- trip_stops.estimated_arrival  (new in 002)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'trip_stops' AND column_name = 'estimated_arrival'
-    ) THEN
-        ALTER TABLE trip_stops ADD COLUMN estimated_arrival TIMESTAMPTZ;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'load_id') THEN
+        ALTER TABLE trips ADD COLUMN load_id UUID REFERENCES loads(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'shipment_id') THEN
+        ALTER TABLE trips ADD COLUMN shipment_id UUID;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'container_id') THEN
+        ALTER TABLE trips ADD COLUMN container_id UUID REFERENCES containers(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trips' AND column_name = 'chassis_number') THEN
+        ALTER TABLE trips ADD COLUMN chassis_number VARCHAR(50);
     END IF;
 
-    -- trip_stops.deleted_at  (added by 001_production_enhancements)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'trip_stops' AND column_name = 'deleted_at'
-    ) THEN
+    -- ── loads ─────────────────────────────────────────────────────────────
+    -- Appointment columns added in 002 but not in 004
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'terminal_appointment_date') THEN
+        ALTER TABLE loads ADD COLUMN terminal_appointment_date DATE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'terminal_appointment_time') THEN
+        ALTER TABLE loads ADD COLUMN terminal_appointment_time VARCHAR(10);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'delivery_appointment_date') THEN
+        ALTER TABLE loads ADD COLUMN delivery_appointment_date DATE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'loads' AND column_name = 'delivery_appointment_time') THEN
+        ALTER TABLE loads ADD COLUMN delivery_appointment_time VARCHAR(10);
+    END IF;
+
+    -- ── trip_stops ────────────────────────────────────────────────────────
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trip_stops' AND column_name = 'estimated_arrival') THEN
+        ALTER TABLE trip_stops ADD COLUMN estimated_arrival TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'trip_stops' AND column_name = 'deleted_at') THEN
         ALTER TABLE trip_stops ADD COLUMN deleted_at TIMESTAMPTZ;
     END IF;
 
-    -- terminal_appointments.terminal_id  (001 always includes it, but guard anyway)
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'terminal_appointments' AND column_name = 'terminal_id'
-    ) THEN
+    -- ── terminal_appointments ────────────────────────────────────────────
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'terminal_appointments' AND column_name = 'terminal_id') THEN
         ALTER TABLE terminal_appointments ADD COLUMN terminal_id UUID;
     END IF;
 END $$;
 
+-- Make shipments FK columns nullable on pre-existing DBs (migration 004 §16)
+DO $$ BEGIN ALTER TABLE shipments ALTER COLUMN customer_id       DROP NOT NULL; EXCEPTION WHEN undefined_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE shipments ALTER COLUMN steamship_line_id DROP NOT NULL; EXCEPTION WHEN undefined_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE shipments ALTER COLUMN port_id           DROP NOT NULL; EXCEPTION WHEN undefined_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE shipments ALTER COLUMN terminal_id       DROP NOT NULL; EXCEPTION WHEN undefined_column THEN NULL; END $$;
+
 -- ==============================================================================
--- 12. INDEXES
+-- 14. INDEXES
 -- ==============================================================================
 
 -- customers
@@ -1217,8 +1574,46 @@ CREATE INDEX IF NOT EXISTS idx_milestones_trip           ON milestones(trip_id);
 CREATE INDEX IF NOT EXISTS idx_milestones_type           ON milestones(type);
 CREATE INDEX IF NOT EXISTS idx_geofences_location        ON geofences(location_id) WHERE location_id IS NOT NULL;
 
+-- loads
+CREATE INDEX IF NOT EXISTS idx_loads_customer       ON loads(customer_id);
+CREATE INDEX IF NOT EXISTS idx_loads_status         ON loads(status);
+CREATE INDEX IF NOT EXISTS idx_loads_container      ON loads(container_number);
+CREATE INDEX IF NOT EXISTS idx_loads_lfd            ON loads(last_free_day);
+CREATE INDEX IF NOT EXISTS idx_loads_created        ON loads(created_at DESC);
+
+-- load sub-tables
+CREATE INDEX IF NOT EXISTS idx_load_charges_load    ON load_charges(load_id);
+CREATE INDEX IF NOT EXISTS idx_load_notes_load      ON load_notes(load_id);
+CREATE INDEX IF NOT EXISTS idx_load_activity_load   ON load_activity_log(load_id);
+
+-- street turns
+CREATE INDEX IF NOT EXISTS idx_street_turns_status  ON street_turns(status);
+CREATE INDEX IF NOT EXISTS idx_street_turns_import  ON street_turns(import_load_id);
+CREATE INDEX IF NOT EXISTS idx_street_turns_export  ON street_turns(export_load_id);
+
+-- yard inventory
+CREATE INDEX IF NOT EXISTS idx_yard_inv_load        ON yard_inventory(load_id) WHERE load_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_yard_inv_status      ON yard_inventory(status);
+
+-- trip_legs
+CREATE INDEX IF NOT EXISTS idx_trip_legs_trip       ON trip_legs(trip_id);
+
+-- trips (new columns)
+CREATE INDEX IF NOT EXISTS idx_trips_load           ON trips(load_id) WHERE load_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trips_shipment       ON trips(shipment_id) WHERE shipment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trips_container2     ON trips(container_id) WHERE container_id IS NOT NULL;
+
+-- container tracking
+CREATE INDEX IF NOT EXISTS idx_container_tracking_num ON container_tracking(container_number);
+
+-- driver rate tables
+CREATE INDEX IF NOT EXISTS idx_driver_assignments_driver ON driver_rate_assignments(driver_id);
+
+-- notifications
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(created_at DESC) WHERE read_at IS NULL;
+
 -- ==============================================================================
--- 13. TRIGGERS (updated_at)
+-- 15. TRIGGERS (updated_at)
 -- ==============================================================================
 
 -- Macro to create trigger if not exists — applied to every table with updated_at
@@ -1229,13 +1624,16 @@ BEGIN
     FOR tbl IN VALUES
         ('customers'),('steamship_lines'),('ports'),('locations'),
         ('shipments'),('containers'),('orders'),
+        ('loads'),('street_turns'),('yard_inventory'),
         ('drivers'),('tractors'),('chassis'),('chassis_pools'),('trailers'),
-        ('trips'),('trip_stops'),
+        ('trips'),('trip_stops'),('trip_legs'),
         ('terminal_appointments'),('terminal_gate_hours'),('exceptions'),
-        ('published_containers'),('gate_fees'),
+        ('published_containers'),('gate_fees'),('container_tracking'),
         ('invoices'),('rates'),('accessorial_rates'),
         ('driver_settlements'),('driver_pay_rates'),
+        ('driver_rate_profiles'),('lane_rates'),('driver_rate_assignments'),
         ('maintenance_records'),
+        ('company_settings'),
         ('geofences')
     LOOP
         IF NOT EXISTS (
@@ -1252,7 +1650,7 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- 14. VIEWS
+-- 16. VIEWS
 -- ==============================================================================
 
 CREATE OR REPLACE VIEW v_active_orders AS
@@ -1334,7 +1732,7 @@ WHERE t.type IN ('LIVE_UNLOAD','DROP_HOOK_SAME','DROP_HOOK_DIFF')
   AND ts.activity IN ('LIVE_UNLOAD','DROP_LOADED');
 
 -- ==============================================================================
--- 15. SEED DATA
+-- 17. SEED DATA
 -- ==============================================================================
 
 -- --- Steamship lines ---
@@ -1540,6 +1938,171 @@ VALUES
     ('REDELIVERY',       'Container redelivery',              'flat',     175.00, 175.00, 0,  TRUE)
 ON CONFLICT DO NOTHING;
 
+-- --- Wizard-style shipments (text columns only, no FK UUIDs) ---
+INSERT INTO shipments (id, type, reference_number, customer_name, steamship_line, terminal_name,
+                       vessel, voyage, last_free_day, status, trip_type,
+                       chassis_required, chassis_pool,
+                       delivery_address, delivery_city, delivery_state, delivery_zip)
+VALUES
+    ('dd0e8400-e29b-41d4-a716-446655440004', 'IMPORT', 'BKG-20260125-004',
+     'TechFlow Electronics',    'Hapag-Lloyd',  'PCT (POLB)',
+     'HLCU VENTURE', 'VO-2601250', '2026-02-12', 'CONFIRMED', 'LIVE',
+     TRUE, 'DCLI',
+     '2345 Tech Parkway', 'Ontario', 'CA', '91762'),
+    ('dd0e8400-e29b-41d4-a716-446655440005', 'IMPORT', 'BKG-20260128-005',
+     'NutriFoods International', 'ONE',          'TTI (POLB)',
+     'ONEY MANHATTAN', 'VO-2601280', '2026-02-18', 'PENDING', 'DROP',
+     TRUE, 'TRAC',
+     '8901 Food Dist Ave', 'Compton', 'CA', '90220')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO containers (id, shipment_id, container_number, size, type, weight_lbs, commodity, current_state, current_location_type)
+VALUES
+    ('ee0e8400-e29b-41d4-a716-446655440005', 'dd0e8400-e29b-41d4-a716-446655440004', 'HLCU9876543', '40', 'DRY',   28100, 'Consumer Electronics', 'LOADED', 'TERMINAL'),
+    ('ee0e8400-e29b-41d4-a716-446655440006', 'dd0e8400-e29b-41d4-a716-446655440005', 'ONEY8765432', '40', 'REEFER', 19800, 'Frozen Seafood',       'LOADED', 'TERMINAL')
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Loads (dispatch board sample data) ---
+INSERT INTO loads (id, load_number, customer_id, container_number, container_size, container_type,
+                   weight_lbs, move_type, terminal, last_free_day,
+                   hold_customs, hold_freight, hold_usda, hold_tmf, in_yard,
+                   status, total_charges)
+VALUES
+    ('a10e8400-e29b-41d4-a716-446655440001', 'LDR-001',
+     '880e8400-e29b-41d4-a716-446655440001',
+     'HAPG1111111', '40', 'DRY', 22400, 'LIVE',    'APM Terminals', '2026-01-29',
+     FALSE, FALSE, FALSE, FALSE, FALSE, 'AVAILABLE', 0),
+
+    ('a10e8400-e29b-41d4-a716-446655440002', 'LDR-002',
+     '880e8400-e29b-41d4-a716-446655440001',
+     'ZIMU2222222', '40', 'DRY', 18800, 'DROP',    'APM Terminals', '2026-02-03',
+     FALSE, FALSE, FALSE, FALSE, FALSE, 'TRACKING', 0),
+
+    ('a10e8400-e29b-41d4-a716-446655440003', 'LDR-003',
+     '880e8400-e29b-41d4-a716-446655440002',
+     'COSU3333333', '40', 'REEFER', 21600, 'LIVE', 'LBCT',          '2026-02-01',
+     TRUE,  FALSE, FALSE, FALSE, FALSE, 'HOLD',               0),
+
+    ('a10e8400-e29b-41d4-a716-446655440004', 'LDR-004',
+     '880e8400-e29b-41d4-a716-446655440003',
+     'CMDU4444444', '20', 'DRY', 14200, 'PREPULL', 'TraPac',        '2026-02-10',
+     FALSE, FALSE, FALSE, FALSE, FALSE, 'READY_FOR_DISPATCH', 0),
+
+    ('a10e8400-e29b-41d4-a716-446655440005', 'LDR-005',
+     '880e8400-e29b-41d4-a716-446655440004',
+     'HLCU5555555', '40', 'DRY', 19500, 'LIVE',    'PCT',           '2026-02-15',
+     FALSE, FALSE, FALSE, FALSE, FALSE, 'DISPATCHED',         73.50),
+
+    ('a10e8400-e29b-41d4-a716-446655440006', 'LDR-006',
+     '880e8400-e29b-41d4-a716-446655440005',
+     'ONEY6666666', '40', 'DRY', 16800, 'DROP',    'TTI',           '2026-02-20',
+     FALSE, FALSE, FALSE, FALSE, TRUE,  'IN_YARD',            0)
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Load charges (for dispatched load LDR-005) ---
+INSERT INTO load_charges (id, load_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
+VALUES
+    ('a40e8400-e29b-41d4-a716-446655440001', 'a10e8400-e29b-41d4-a716-446655440005',
+     'FUEL_SURCHARGE',  'Fuel surcharge',            1, 45.00, 45.00, 'CUSTOMER', TRUE),
+    ('a40e8400-e29b-41d4-a716-446655440002', 'a10e8400-e29b-41d4-a716-446655440005',
+     'CHASSIS_RENTAL',  'DCLI chassis rental (1 day)', 1, 28.50, 28.50, 'CUSTOMER', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Load notes ---
+INSERT INTO load_notes (id, load_id, author_name, author_type, message, visible_to_customer)
+VALUES
+    ('a50e8400-e29b-41d4-a716-446655440001', 'a10e8400-e29b-41d4-a716-446655440003',
+     'Dispatch Team', 'INTERNAL',
+     'Customs hold placed by CBP. Awaiting release — est. 2 business days.', FALSE),
+    ('a50e8400-e29b-41d4-a716-446655440002', 'a10e8400-e29b-41d4-a716-446655440005',
+     'James Rodriguez', 'DRIVER',
+     'Picked up container at PCT, en route to delivery.', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Load activity log ---
+INSERT INTO load_activity_log (id, load_id, action, from_value, to_value, performed_by)
+VALUES
+    ('a60e8400-e29b-41d4-a716-446655440001', 'a10e8400-e29b-41d4-a716-446655440003',
+     'STATUS_CHANGE', 'TRACKING', 'HOLD', 'SYSTEM'),
+    ('a60e8400-e29b-41d4-a716-446655440002', 'a10e8400-e29b-41d4-a716-446655440005',
+     'STATUS_CHANGE', 'READY_FOR_DISPATCH', 'DISPATCHED', 'Dispatch Manager'),
+    ('a60e8400-e29b-41d4-a716-446655440003', 'a10e8400-e29b-41d4-a716-446655440005',
+     'DRIVER_ASSIGNED', NULL, 'James Rodriguez (DRV-001)', 'Dispatch Manager')
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Trip (dispatched load LDR-005 → driver James Rodriguez / TRK-0101) ---
+INSERT INTO trips (id, trip_number, type, status, driver_id, tractor_id, chassis_number,
+                   load_id, planned_start_time, created_at, updated_at)
+VALUES
+    ('a20e8400-e29b-41d4-a716-446655440001', 'TRP-20260131-0001', 'LIVE_LOAD', 'DISPATCHED',
+     'aa0e8400-e29b-41d4-a716-446655440001',
+     'bb0e8400-e29b-41d4-a716-446655440001',
+     'CHS-4401',
+     'a10e8400-e29b-41d4-a716-446655440005',
+     '2026-01-31 08:00:00+00', NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Trip legs (pickup + delivery for the dispatched trip) ---
+INSERT INTO trip_legs (id, trip_id, leg_number, leg_type, location_name, location_city, location_state,
+                       scheduled_time, status)
+VALUES
+    ('a30e8400-e29b-41d4-a716-446655440001', 'a20e8400-e29b-41d4-a716-446655440001',
+     1, 'PICKUP',   'PCT Terminal',                    'Long Beach', 'CA', '2026-01-31 08:00:00+00', 'COMPLETED'),
+    ('a30e8400-e29b-41d4-a716-446655440002', 'a20e8400-e29b-41d4-a716-446655440001',
+     2, 'DELIVERY', 'Harbor Freight Forwarding DC',   'Houston',    'TX', '2026-01-31 14:00:00+00', 'PENDING')
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Company settings (singleton) ---
+INSERT INTO company_settings (id, name, address, city, state, zip, phone, email, mc_number, dot_number)
+VALUES
+    ('default', 'DrayMaster Drayage', '1234 Harbor Dr', 'Carson', 'CA', '90745',
+     '(310) 555-9900', 'dispatch@draymaster.com', 'MC-1234567', 'DOT-7654321')
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Driver rate profiles ---
+INSERT INTO driver_rate_profiles (id, profile_name, driver_type, pay_method, default_rate,
+                                  waiting_free_hours, waiting_rate_per_hour, hazmat_pay, overweight_pay,
+                                  is_active)
+VALUES
+    ('c10e8400-e29b-41d4-a716-446655440001', 'Company Driver — Standard', 'COMPANY_DRIVER', 'PER_LOAD',  200.00, 2, 35.00, 50.00, 25.00, TRUE),
+    ('c10e8400-e29b-41d4-a716-446655440002', 'Owner Operator — Standard', 'OWNER_OPERATOR', 'PERCENTAGE', 0,    2,  0.00,  0.00,  0.00, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Lane rates ---
+INSERT INTO lane_rates (id, origin_type, origin_value, destination_type, destination_value,
+                        flat_rate, estimated_miles, is_active)
+VALUES
+    ('c20e8400-e29b-41d4-a716-446655440001', 'terminal', 'APM_POLA',  'warehouse', 'Inland Empire', 75.00, 45.00, TRUE),
+    ('c20e8400-e29b-41d4-a716-446655440002', 'terminal', 'LBCT_POLB', 'warehouse', 'Inland Empire', 70.00, 40.00, TRUE),
+    ('c20e8400-e29b-41d4-a716-446655440003', 'warehouse','Inland Empire', 'terminal', 'APM_POLA',    75.00, 45.00, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Driver rate assignments ---
+INSERT INTO driver_rate_assignments (id, driver_id, rate_profile_id)
+VALUES
+    ('c30e8400-e29b-41d4-a716-446655440001', 'aa0e8400-e29b-41d4-a716-446655440001', 'c10e8400-e29b-41d4-a716-446655440001'),
+    ('c30e8400-e29b-41d4-a716-446655440002', 'aa0e8400-e29b-41d4-a716-446655440002', 'c10e8400-e29b-41d4-a716-446655440001'),
+    ('c30e8400-e29b-41d4-a716-446655440003', 'aa0e8400-e29b-41d4-a716-446655440004', 'c10e8400-e29b-41d4-a716-446655440001'),
+    ('c30e8400-e29b-41d4-a716-446655440004', 'aa0e8400-e29b-41d4-a716-446655440005', 'c10e8400-e29b-41d4-a716-446655440001')
+ON CONFLICT (id) DO NOTHING;
+
+-- --- Notifications ---
+INSERT INTO notifications (id, target_type, target_id, title, message, severity, channel, status)
+VALUES
+    ('b10e8400-e29b-41d4-a716-446655440001', 'LOAD', 'LDR-003',
+     'LFD Alert: COSU3333333',
+     'Last free day is tomorrow (2026-02-01). Container at LBCT is on customs hold.',
+     'HIGH', 'DASHBOARD', 'PENDING'),
+    ('b10e8400-e29b-41d4-a716-446655440002', 'LOAD', 'LDR-001',
+     'LFD Overdue: HAPG1111111',
+     'Last free day was 2026-01-29. Demurrage charges may apply.',
+     'CRITICAL', 'DASHBOARD', 'PENDING'),
+    ('b10e8400-e29b-41d4-a716-446655440003', 'TRIP', 'TRP-20260131-0001',
+     'Dispatch Confirmed',
+     'Driver James Rodriguez dispatched for load LDR-005 (HLCU5555555) via TRK-0101.',
+     'LOW', 'DASHBOARD', 'PENDING')
+ON CONFLICT (id) DO NOTHING;
+
 -- ==============================================================================
 -- VERIFICATION
 -- ==============================================================================
@@ -1552,18 +2115,21 @@ WHERE table_schema = 'public'
   AND table_name IN (
       'customers','steamship_lines','ports','locations',
       'shipments','containers','orders',
-      'drivers','tractors','chassis','chassis_pools','trailers',
-      'trips','trip_stops','trip_orders','stop_documents',
+      'loads','load_charges','load_notes','load_activity_log','street_turns',
+      'drivers','tractors','chassis','chassis_pools','trailers','yard_inventory',
+      'trips','trip_stops','trip_legs','trip_orders','stop_documents',
       'terminal_appointments','terminal_gate_hours',
       'exceptions','exception_comments','exception_history',
-      'published_containers','gate_fees',
+      'published_containers','gate_fees','container_tracking',
       'invoices','invoice_line_items','payments',
       'rates','accessorial_rates',
       'driver_settlements','settlement_line_items','driver_pay_rates',
+      'driver_rate_profiles','lane_rates','driver_rate_assignments',
       'hos_logs','hos_violations','compliance_alerts','driver_documents',
       'chassis_usage','maintenance_records','fuel_transactions',
       'equipment_inspections','inspection_defects',
-      'location_records','milestones','geofences'
+      'location_records','milestones','geofences',
+      'company_settings','notifications'
   )
 GROUP BY table_name
 ORDER BY table_name;
