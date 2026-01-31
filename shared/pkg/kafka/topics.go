@@ -42,6 +42,12 @@ type TopicRegistry struct {
 	PaymentReceived     string
 	SettlementGenerated string
 
+	// eModal Integration Service topics
+	EModalContainerStatusUpdated string
+	EModalGateIn                 string
+	EModalGateOut                string
+	EModalContainerPublished     string
+
 	// System topics
 	NotificationSent    string
 	AlertTriggered      string
@@ -88,6 +94,12 @@ var Topics = TopicRegistry{
 	InvoiceCreated:      "billing.invoice.created",
 	PaymentReceived:     "billing.payment.received",
 	SettlementGenerated: "billing.settlement.generated",
+
+	// eModal Integration Service
+	EModalContainerStatusUpdated: "emodal.container.status_updated",
+	EModalGateIn:                 "emodal.container.gate_in",
+	EModalGateOut:                "emodal.container.gate_out",
+	EModalContainerPublished:     "emodal.container.published",
 
 	// System
 	NotificationSent: "system.notification.sent",
@@ -136,6 +148,12 @@ func (t *TopicRegistry) GetAllTopics() []string {
 		t.InvoiceCreated,
 		t.PaymentReceived,
 		t.SettlementGenerated,
+
+		// eModal Integration Service
+		t.EModalContainerStatusUpdated,
+		t.EModalGateIn,
+		t.EModalGateOut,
+		t.EModalContainerPublished,
 
 		// System
 		t.NotificationSent,

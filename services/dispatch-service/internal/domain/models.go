@@ -79,6 +79,7 @@ const (
 	StopStatusCompleted  StopStatus = "COMPLETED"
 	StopStatusFailed     StopStatus = "FAILED"
 	StopStatusSkipped    StopStatus = "SKIPPED"
+	StopStatusCancelled  StopStatus = "CANCELLED"
 )
 
 // Trip represents a driver's trip with stops
@@ -98,6 +99,7 @@ type Trip struct {
 	EstimatedDurationMins int        `json:"estimated_duration_mins" db:"estimated_duration_mins"`
 	TotalMiles            float64    `json:"total_miles" db:"total_miles"`
 	CompletedMiles        float64    `json:"completed_miles" db:"completed_miles"`
+	Revenue               float64    `json:"revenue" db:"revenue"`
 	IsStreetTurn          bool       `json:"is_street_turn" db:"is_street_turn"`
 	IsDualTransaction     bool       `json:"is_dual_transaction" db:"is_dual_transaction"`
 	LinkedTripID          *uuid.UUID `json:"linked_trip_id,omitempty" db:"linked_trip_id"`
@@ -128,6 +130,7 @@ type TripStop struct {
 	AppointmentNumber     string       `json:"appointment_number,omitempty" db:"appointment_number"`
 	AppointmentWindowMins int          `json:"appointment_window_mins" db:"appointment_window_mins"`
 	PlannedArrival        *time.Time   `json:"planned_arrival,omitempty" db:"planned_arrival"`
+	EstimatedArrival      *time.Time   `json:"estimated_arrival,omitempty" db:"estimated_arrival"`
 	ActualArrival         *time.Time   `json:"actual_arrival,omitempty" db:"actual_arrival"`
 	ActualDeparture       *time.Time   `json:"actual_departure,omitempty" db:"actual_departure"`
 	EstimatedDurationMins int          `json:"estimated_duration_mins" db:"estimated_duration_mins"`
@@ -216,12 +219,21 @@ type StreetTurnOpportunity struct {
 	ExportPickupLocation   Location  `json:"export_pickup_location"`
 	ExportPickupDate       time.Time `json:"export_pickup_date"`
 	
-	SteamshipLine   string  `json:"steamship_line"`
-	ContainerSize   string  `json:"container_size"`
-	ContainerType   string  `json:"container_type"`
-	DistanceMiles   float64 `json:"distance_miles"`
+	ImportContainerSize string    `json:"import_container_size"`
+	ImportTerminalID    uuid.UUID `json:"import_terminal_id"`
+	ImportSSLID         uuid.UUID `json:"import_ssl_id"`
+
+	ExportContainerSize string    `json:"export_container_size"`
+	ExportTerminalID    uuid.UUID `json:"export_terminal_id"`
+	ExportSSLID         uuid.UUID `json:"export_ssl_id"`
+	ExportRevenue       float64   `json:"export_revenue"`
+
+	SteamshipLine    string  `json:"steamship_line"`
+	ContainerSize    string  `json:"container_size"`
+	ContainerType    string  `json:"container_type"`
+	DistanceMiles    float64 `json:"distance_miles"`
 	EstimatedSavings float64 `json:"estimated_savings"`
-	MatchScore      int     `json:"match_score"`
+	MatchScore       int     `json:"match_score"`
 }
 
 // DispatchBoard represents the kanban-style dispatch board

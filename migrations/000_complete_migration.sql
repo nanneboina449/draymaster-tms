@@ -7,6 +7,7 @@
 --   1. Order Service Base Schema (tables: orders, containers, shipments, etc.)
 --   2. Dispatch Service Base Schema (tables: trips, trip_stops, etc.)
 --   3. Production Enhancements (appointments, exceptions, indexes, views)
+--   4. Complete Schema (all 43 tables, indexes, views, triggers, seed data)
 --
 -- Run Order: Execute this single file instead of running migrations separately
 --
@@ -24,7 +25,7 @@
 -- PART 1: ORDER SERVICE BASE SCHEMA
 -- ==============================================================================
 
-\echo '--- Part 1/3: Creating Order Service Base Schema ---'
+\echo '--- Part 1/4: Creating Order Service Base Schema ---'
 \echo ''
 
 \i services/order-service/migrations/000001_init_schema.up.sql
@@ -37,7 +38,7 @@
 -- PART 2: DISPATCH SERVICE BASE SCHEMA
 -- ==============================================================================
 
-\echo '--- Part 2/3: Creating Dispatch Service Base Schema ---'
+\echo '--- Part 2/4: Creating Dispatch Service Base Schema ---'
 \echo ''
 
 \i services/dispatch-service/migrations/000001_init_schema.up.sql
@@ -50,13 +51,26 @@
 -- PART 3: PRODUCTION ENHANCEMENTS
 -- ==============================================================================
 
-\echo '--- Part 3/3: Applying Production Enhancements ---'
+\echo '--- Part 3/4: Applying Production Enhancements ---'
 \echo ''
 
 \i migrations/001_production_enhancements.sql
 
 \echo ''
 \echo '✓ Production Enhancements Applied'
+\echo ''
+
+-- ==============================================================================
+-- PART 4: COMPLETE SCHEMA (ALL SERVICES)
+-- ==============================================================================
+
+\echo '--- Part 4/4: Applying Complete Schema (all tables, indexes, views, seed data) ---'
+\echo ''
+
+\i migrations/002_complete_schema.sql
+
+\echo ''
+\echo '✓ Complete Schema Applied'
 \echo ''
 
 -- ==============================================================================
@@ -96,6 +110,31 @@ UNION ALL
 SELECT 'exception_comments', COUNT(*) FROM exception_comments
 UNION ALL
 SELECT 'exception_history', COUNT(*) FROM exception_history;
+
+\echo ''
+\echo '--- Checking Complete Schema Seed Data ---'
+SELECT
+    'customers' AS table_name,
+    COUNT(*) AS row_count
+FROM customers
+UNION ALL
+SELECT 'steamship_lines', COUNT(*) FROM steamship_lines
+UNION ALL
+SELECT 'ports', COUNT(*) FROM ports
+UNION ALL
+SELECT 'locations', COUNT(*) FROM locations
+UNION ALL
+SELECT 'drivers', COUNT(*) FROM drivers
+UNION ALL
+SELECT 'tractors', COUNT(*) FROM tractors
+UNION ALL
+SELECT 'chassis', COUNT(*) FROM chassis
+UNION ALL
+SELECT 'published_containers', COUNT(*) FROM published_containers
+UNION ALL
+SELECT 'rates', COUNT(*) FROM rates
+UNION ALL
+SELECT 'accessorial_rates', COUNT(*) FROM accessorial_rates;
 
 \echo ''
 \echo '--- Checking Views ---'

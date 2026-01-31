@@ -395,7 +395,7 @@ type CompleteStopInput struct {
 }
 
 // FindStreetTurnOpportunities finds potential street turn matches
-func (s *DispatchService) FindStreetTurnOpportunities(ctx context.Context, filter StreetTurnFilter) ([]domain.StreetTurnOpportunity, error) {
+func (s *DispatchService) FindStreetTurnOpportunities(ctx context.Context, filter repository.StreetTurnFilter) ([]domain.StreetTurnOpportunity, error) {
 	opportunities, err := s.tripRepo.FindStreetTurnMatches(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find street turn opportunities: %w", err)
@@ -413,16 +413,6 @@ func (s *DispatchService) FindStreetTurnOpportunities(ctx context.Context, filte
 	})
 
 	return opportunities, nil
-}
-
-// StreetTurnFilter contains filter criteria for street turn matching
-type StreetTurnFilter struct {
-	ImportOrderID    *uuid.UUID
-	ExportOrderID    *uuid.UUID
-	SteamshipLineID  *uuid.UUID
-	ContainerSize    string
-	MaxDistanceMiles int
-	MaxResults       int
 }
 
 // CreateStreetTurn creates a street turn trip linking import and export orders
@@ -563,7 +553,7 @@ func (s *DispatchService) GetDriverAvailability(ctx context.Context, pickupLat, 
 
 // Helper methods
 
-func (s *DispatchService) calculateTripMetrics(ctx context.Context, stops []CreateStopInput) (float64, int) {
+func (s *DispatchService) calculateTripMetrics(_ context.Context, stops []CreateStopInput) (float64, int) {
 	var totalMiles float64
 	var totalDuration int
 

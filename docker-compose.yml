@@ -222,6 +222,34 @@ services:
       - draymaster
     restart: unless-stopped
 
+  emodal-integration:
+    build:
+      context: ./services/emodal-integration
+      dockerfile: Dockerfile
+    environment:
+      SERVICE_NAME: emodal-integration
+      ENVIRONMENT: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: draymaster
+      DB_PASSWORD: draymaster_secret
+      DB_NAME: emodal
+      KAFKA_BROKERS: kafka:9092
+      GRPC_PORT: 9090
+      HTTP_PORT: 8080
+      EMODAL_BASE_URL: https://apigateway.emodal.com
+      EMODAL_API_KEY: ""
+      EMODAL_TIMEOUT: 30s
+    ports:
+      - "8087:8080"
+      - "9097:9090"
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - draymaster
+    restart: unless-stopped
+
   # ==================== API Gateway ====================
   api-gateway:
     build:
