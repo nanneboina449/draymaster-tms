@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { 
-  ContainerSize, 
-  ContainerType, 
-  CustomsStatus, 
+import {
+  ContainerSize,
+  ContainerType,
+  CustomsStatus,
   TripType,
-  TRIP_TYPE_INFO 
+  TRIP_TYPE_INFO
 } from '../../types';
+import { validateContainerNumber } from '../../lib/validations';
 
 interface ContainerInput {
   containerNumber: string;
@@ -100,8 +101,71 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
     pool: 'DCLI',
     preferredSize: '40',
   });
+  const [containerErrors, setContainerErrors] = useState<Record<number, string | undefined>>({});
 
   if (!isOpen) return null;
+
+  const validateContainerInput = (index: number, value: string) => {
+    if (!value || value.length < 11) {
+      setContainerErrors(prev => ({ ...prev, [index]: undefined }));
+      return;
+    }
+    const result = validateContainerNumber(value);
+    setContainerErrors(prev => ({
+      ...prev,
+      [index]: result.valid ? undefined : result.error,
+    }));
+  };
+
+  const [stepErrors, setStepErrors] = useState<string[]>([]);
+
+  const validateCurrentStep = (): boolean => {
+    const errors: string[] = [];
+
+    if (step === 1) {
+      if (!formData.customer) errors.push('Customer is required');
+      if (!formData.steamshipLine) errors.push('Steamship Line is required');
+      if (!formData.bookingNumber) errors.push('Booking Number is required');
+      if (!formData.terminal) errors.push('Terminal is required');
+      if (formData.type === 'IMPORT' && !formData.lastFreeDay) {
+        errors.push('Last Free Day is required for imports');
+      }
+      if (formData.type === 'EXPORT' && !formData.portCutoff) {
+        errors.push('Port Cutoff is required for exports');
+      }
+    }
+
+    if (step === 2) {
+      containers.forEach((container, index) => {
+        if (!container.containerNumber) {
+          errors.push(`Container #${index + 1}: Container number is required`);
+        } else if (containerErrors[index]) {
+          errors.push(`Container #${index + 1}: ${containerErrors[index]}`);
+        }
+      });
+    }
+
+    if (step === 3 && formData.type === 'EXPORT') {
+      if (!pickupLocation.name) errors.push('Pickup location name is required');
+      if (!pickupLocation.address) errors.push('Pickup address is required');
+      if (!pickupLocation.city) errors.push('Pickup city is required');
+    }
+
+    if (step === 3 && formData.type === 'IMPORT') {
+      if (!deliveryLocation.name) errors.push('Delivery location name is required');
+      if (!deliveryLocation.address) errors.push('Delivery address is required');
+      if (!deliveryLocation.city) errors.push('Delivery city is required');
+    }
+
+    setStepErrors(errors);
+    return errors.length === 0;
+  };
+
+  const handleNextStep = () => {
+    if (validateCurrentStep()) {
+      setStep(step + 1);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -116,6 +180,10 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
     const updated = [...containers];
     updated[index] = { ...updated[index], [field]: value };
     setContainers(updated);
+    // Validate container number on change
+    if (field === 'containerNumber') {
+      validateContainerInput(index, value);
+    }
   };
 
   const addContainer = () => {
@@ -453,9 +521,21 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
                           value={container.containerNumber}
                           onChange={(e) => handleContainerChange(index, 'containerNumber', e.target.value.toUpperCase())}
                           placeholder="MSCU1234567"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+                          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono ${
+                            containerErrors[index]
+                              ? 'border-red-500 bg-red-50'
+                              : container.containerNumber.length === 11 && !containerErrors[index]
+                              ? 'border-green-500 bg-green-50'
+                              : 'border-gray-300'
+                          }`}
                           maxLength={11}
                         />
+                        {containerErrors[index] && (
+                          <p className="mt-1 text-sm text-red-600">{containerErrors[index]}</p>
+                        )}
+                        {container.containerNumber.length === 11 && !containerErrors[index] && (
+                          <p className="mt-1 text-sm text-green-600">Valid container number</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
@@ -1091,21 +1171,36 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between">
-            <button
-              type="button"
-              onClick={() => step > 1 ? setStep(step - 1) : onClose()}
-              className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
-            >
-              {step === 1 ? 'Cancel' : 'Back'}
-            </button>
-            <button
-              type="button"
-              onClick={() => step < 5 ? setStep(step + 1) : handleSubmit()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              {step < 5 ? 'Continue' : 'Create Shipment'}
-            </button>
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+            {stepErrors.length > 0 && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm font-medium text-red-800 mb-1">Please fix the following errors:</p>
+                <ul className="text-sm text-red-600 list-disc list-inside">
+                  {stepErrors.map((error, i) => (
+                    <li key={i}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setStepErrors([]);
+                  step > 1 ? setStep(step - 1) : onClose();
+                }}
+                className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+              >
+                {step === 1 ? 'Cancel' : 'Back'}
+              </button>
+              <button
+                type="button"
+                onClick={() => step < 5 ? handleNextStep() : handleSubmit()}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                {step < 5 ? 'Continue' : 'Create Shipment'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

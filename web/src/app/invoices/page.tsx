@@ -39,6 +39,8 @@ interface Invoice {
   amount_paid: number;
   balance_due: number;
   status: string;
+  billing_address?: string;
+  notes?: string;
   customers?: Customer;
   invoice_line_items?: InvoiceLineItem[];
 }

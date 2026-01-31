@@ -31,13 +31,18 @@ export interface Driver {
   id: string;
   first_name: string;
   last_name: string;
+  name?: string; // computed: first_name + last_name
   phone?: string;
   email?: string;
   license_number?: string;
+  license_state?: string;
   license_expiry?: string;
+  twic_expiry?: string;
   hazmat_endorsement?: boolean;
   twic_card?: boolean;
   status: string;
+  pay_type?: string;
+  pay_rate?: number | string;
   created_at?: string;
 }
 
@@ -61,6 +66,7 @@ export interface Chassis {
   size?: string;
   type?: string;
   status: string;
+  current_location?: string;
   created_at?: string;
 }
 
@@ -70,6 +76,7 @@ export interface Order {
   customer_id?: string;
   type: string;
   status: string;
+  billing_status?: 'UNBILLED' | 'BILLED' | 'PAID';
   container_number?: string;
   pickup_location?: string;
   delivery_location?: string;
@@ -82,6 +89,7 @@ export interface Order {
 
 export interface Trip {
   id: string;
+  trip_number?: string;
   type?: string;
   status: string;
   order_id?: string;
@@ -90,10 +98,16 @@ export interface Trip {
   tractor_id?: string;
   chassis_id?: string;
   chassis_number?: string;
+  chassis?: Chassis;
   container_number?: string;
   pickup_location?: string;
   delivery_location?: string;
   planned_start?: string;
+  actual_start?: string;
+  pickup_arrival?: string;
+  pickup_departure?: string;
+  delivery_arrival?: string;
+  actual_end?: string;
   notes?: string;
   priority?: string;
   is_team_driver?: boolean;
@@ -150,12 +164,20 @@ export interface Invoice {
   id: string;
   invoice_number: string;
   customer_id?: string;
+  customer_name?: string;
   shipment_id?: string;
   subtotal: number;
   tax: number;
+  tax_rate?: number;
+  tax_amount?: number;
   total: number;
+  total_amount?: number; // alias for total
+  balance_due?: number;
   status: string;
+  invoice_date?: string;
   due_date?: string;
+  billing_address?: string;
+  notes?: string;
   created_at?: string;
 }
 
@@ -214,6 +236,11 @@ export async function updateDriver(id: string, updates: Partial<Driver>): Promis
 
 export async function deleteDriver(id: string): Promise<boolean> {
   const { error } = await supabase.from('drivers').delete().eq('id', id);
+  return !error;
+}
+
+export async function updateDriverStatus(id: string, status: string): Promise<boolean> {
+  const { error } = await supabase.from('drivers').update({ status }).eq('id', id);
   return !error;
 }
 
@@ -405,6 +432,11 @@ export async function updateTrip(id: string, updates: Partial<Trip>): Promise<bo
   return !error;
 }
 
+export async function updateTripStatus(id: string, status: string): Promise<boolean> {
+  const { error } = await supabase.from('trips').update({ status }).eq('id', id);
+  return !error;
+}
+
 // SHIPMENTS
 export async function getShipments(): Promise<Shipment[]> {
   const { data, error } = await supabase
@@ -542,7 +574,7 @@ export async function getInvoices(): Promise<Invoice[]> {
   return data || [];
 }
 
-export async function createInvoice(invoice: Partial<Invoice>): Promise<Invoice | null> {
+export async function createInvoice(invoice: Partial<Invoice>, items?: any[]): Promise<Invoice | null> {
   const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
   const { data, error } = await supabase
     .from('invoices')
@@ -550,11 +582,27 @@ export async function createInvoice(invoice: Partial<Invoice>): Promise<Invoice 
     .select()
     .single();
   if (error) { console.error('Error:', error); return null; }
+
+  // Create line items if provided
+  if (items && items.length > 0 && data) {
+    for (const item of items) {
+      await supabase.from('invoice_line_items').insert({
+        invoice_id: data.id,
+        ...item,
+      });
+    }
+  }
+
   return data;
 }
 
 export async function updateInvoice(id: string, updates: Partial<Invoice>): Promise<boolean> {
   const { error } = await supabase.from('invoices').update(updates).eq('id', id);
+  return !error;
+}
+
+export async function deleteInvoice(id: string): Promise<boolean> {
+  const { error } = await supabase.from('invoices').delete().eq('id', id);
   return !error;
 }
 
@@ -581,7 +629,7 @@ export async function createSettlement(settlement: any): Promise<any> {
 export type OrderType = 'IMPORT' | 'EXPORT';
 export type MoveType = 'LIVE' | 'DROP' | 'PREPULL' | 'STREET_TURN' | 'RETURN_EMPTY';
 export type ContainerSize = '20' | '40' | '40HC' | '45';
-export type TerminalStatus = 'ON_VESSEL' | 'DISCHARGED' | 'AVAILABLE' | 'PICKED_UP' | 'RETURNED';
+export type TerminalStatus = 'ON_VESSEL' | 'DISCHARGED' | 'AVAILABLE' | 'PICKED_UP' | 'RETURNED' | 'TRACKING';
 export type LoadStatus = 'TRACKING' | 'AVAILABLE' | 'HOLD' | 'APPOINTMENT_NEEDED' | 'READY_FOR_DISPATCH' | 'DISPATCHED' | 'IN_YARD' | 'IN_TRANSIT' | 'AT_PICKUP' | 'AT_DELIVERY' | 'RETURNING' | 'COMPLETED' | 'INVOICED' | 'CANCELLED';
 export type ChargeType = 'LINE_HAUL' | 'FUEL_SURCHARGE' | 'PREPULL' | 'DETENTION' | 'STORAGE' | 'CHASSIS_SPLIT' | 'CHASSIS_RENTAL' | 'DEMURRAGE' | 'GATE_FEE' | 'HAZMAT' | 'OVERWEIGHT' | 'TRIAXLE' | 'WAITING_TIME' | 'STOP_OFF' | 'OTHER';
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';

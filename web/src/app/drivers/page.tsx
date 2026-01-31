@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { getDrivers, createDriver, updateDriver, deleteDriver, updateDriverStatus, Driver } from '../../lib/supabase';
+import { SkeletonTable, SkeletonCard } from '../../components/ui/LoadingState';
+import { ErrorAlert, EmptyState, parseError, showToast } from '../../components/ui/ErrorState';
 
 export default function DriversPage() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [formData, setFormData] = useState({
@@ -20,10 +23,12 @@ export default function DriversPage() {
   const fetchDrivers = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await getDrivers();
       setDrivers(data || []);
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      console.error('Error:', err);
+      setError(parseError(err));
     } finally {
       setLoading(false);
     }
@@ -33,13 +38,15 @@ export default function DriversPage() {
     try {
       if (editingDriver) {
         await updateDriver(editingDriver.id, formData);
+        showToast('Driver updated successfully', 'success');
       } else {
         await createDriver(formData);
+        showToast('Driver created successfully', 'success');
       }
       await fetchDrivers();
       closeModal();
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast(parseError(err), 'error');
     }
   };
 
@@ -47,18 +54,20 @@ export default function DriversPage() {
     if (!confirm('Delete this driver?')) return;
     try {
       await deleteDriver(id);
+      showToast('Driver deleted successfully', 'success');
       await fetchDrivers();
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast(parseError(err), 'error');
     }
   };
 
   const handleStatusChange = async (id: string, status: string) => {
     try {
       await updateDriverStatus(id, status);
+      showToast('Status updated', 'success');
       await fetchDrivers();
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast(parseError(err), 'error');
     }
   };
 
@@ -127,18 +136,37 @@ export default function DriversPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Total Drivers</p><p className="text-2xl font-bold">{stats.total}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Available</p><p className="text-2xl font-bold text-green-600">{stats.available}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Driving</p><p className="text-2xl font-bold text-purple-600">{stats.driving}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Off Duty</p><p className="text-2xl font-bold text-gray-600">{stats.offDuty}</p></div>
-        <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Hazmat Certified</p><p className="text-2xl font-bold text-orange-600">{stats.hazmat}</p></div>
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Total Drivers</p><p className="text-2xl font-bold">{stats.total}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Available</p><p className="text-2xl font-bold text-green-600">{stats.available}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Driving</p><p className="text-2xl font-bold text-purple-600">{stats.driving}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Off Duty</p><p className="text-2xl font-bold text-gray-600">{stats.offDuty}</p></div>
+          <div className="bg-white rounded-xl shadow p-4"><p className="text-sm text-gray-500">Hazmat Certified</p><p className="text-2xl font-bold text-orange-600">{stats.hazmat}</p></div>
+        </div>
+      )}
+
+      {error && (
+        <ErrorAlert message={error} onRetry={fetchDrivers} />
+      )}
 
       {loading ? (
-        <div className="bg-white rounded-xl shadow p-12 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-        </div>
+        <SkeletonTable rows={5} columns={7} />
+      ) : drivers.length === 0 ? (
+        <EmptyState
+          title="No drivers found"
+          message="Get started by adding your first driver"
+          actionLabel="Add Driver"
+          onAction={() => openModal()}
+        />
       ) : (
         <div className="bg-white rounded-xl shadow overflow-hidden">
           <table className="w-full">
@@ -170,13 +198,13 @@ export default function DriversPage() {
                   <td className="px-6 py-4 text-sm text-gray-500">{driver.phone}</td>
                   <td className="px-6 py-4">
                     <div className="text-sm">{driver.license_number}</div>
-                    <div className={`text-xs ${isExpiringSoon(driver.license_expiry) ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                      Exp: {driver.license_expiry || '-'} {isExpiringSoon(driver.license_expiry) && '⚠️'}
+                    <div className={`text-xs ${isExpiringSoon(driver.license_expiry || '') ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                      Exp: {driver.license_expiry || '-'} {isExpiringSoon(driver.license_expiry || '') && '⚠️'}
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`text-sm ${isExpiringSoon(driver.twic_expiry) ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                      {driver.twic_expiry || '-'} {isExpiringSoon(driver.twic_expiry) && '⚠️'}
+                    <span className={`text-sm ${isExpiringSoon(driver.twic_expiry || '') ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                      {driver.twic_expiry || '-'} {isExpiringSoon(driver.twic_expiry || '') && '⚠️'}
                     </span>
                   </td>
                   <td className="px-6 py-4">

@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
+import {
   Order, Customer, OrderType, ShippingLine, Terminal,
-  SHIPPING_LINE_LABELS, TERMINAL_LABELS 
+  SHIPPING_LINE_LABELS, TERMINAL_LABELS
 } from '@/lib/types';
 import { supabase, createLoad } from '@/lib/supabase';
+import { validateContainerNumber } from '@/lib/validations';
 
 interface OrderEntryFormProps {
   onClose: () => void;
@@ -63,6 +64,7 @@ export default function OrderEntryForm({ onClose, onSuccess }: OrderEntryFormPro
     is_hazmat: false,
     is_overweight: false,
   }]);
+  const [containerErrors, setContainerErrors] = useState<Record<number, string | undefined>>({});
 
   useEffect(() => {
     loadCustomers();
@@ -92,6 +94,19 @@ export default function OrderEntryForm({ onClose, onSuccess }: OrderEntryFormPro
     const updated = [...containers];
     updated[index] = { ...updated[index], [field]: value };
     setContainers(updated);
+
+    // Validate container number on change
+    if (field === 'container_number') {
+      if (!value || value.length < 11) {
+        setContainerErrors(prev => ({ ...prev, [index]: undefined }));
+      } else {
+        const result = validateContainerNumber(value);
+        setContainerErrors(prev => ({
+          ...prev,
+          [index]: result.valid ? undefined : result.error,
+        }));
+      }
+    }
   };
 
   const removeContainer = (index: number) => {
@@ -578,9 +593,19 @@ export default function OrderEntryForm({ onClose, onSuccess }: OrderEntryFormPro
                           type="text"
                           value={container.container_number}
                           onChange={(e) => updateContainer(index, 'container_number', e.target.value.toUpperCase())}
-                          className="w-full px-2 py-1 border rounded text-sm font-mono"
+                          className={`w-full px-2 py-1 border rounded text-sm font-mono ${
+                            containerErrors[index]
+                              ? 'border-red-500 bg-red-50'
+                              : container.container_number.length === 11 && !containerErrors[index]
+                              ? 'border-green-500 bg-green-50'
+                              : ''
+                          }`}
                           placeholder="MSCU1234567"
+                          maxLength={11}
                         />
+                        {containerErrors[index] && (
+                          <p className="mt-1 text-xs text-red-600">{containerErrors[index]}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs text-gray-600 mb-1">Size</label>

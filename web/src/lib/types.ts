@@ -695,18 +695,18 @@ export interface DispatchBoardItem {
 export interface StreetTurnOpportunity {
   import_load_id: string;
   import_container?: string;
-  import_ssl?: ShippingLine;
-  import_size?: ContainerSize;
+  import_ssl?: string;
+  import_size?: ContainerSize | string;
   import_customer?: string;
   import_delivery_city?: string;
-  
+
   export_load_id: string;
   export_container?: string;
-  export_ssl?: ShippingLine;
-  export_size?: ContainerSize;
+  export_ssl?: string;
+  export_size?: ContainerSize | string;
   export_customer?: string;
   export_pickup_city?: string;
-  
+
   match_score: number;
 }
 

@@ -273,7 +273,7 @@ export function AlertBanner() {
   };
 
   const handleDismiss = async (id: string) => {
-    setDismissed(prev => new Set([...prev, id]));
+    setDismissed(prev => new Set([...Array.from(prev), id]));
     await markNotificationRead(id);
   };
 
