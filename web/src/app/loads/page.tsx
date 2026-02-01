@@ -104,6 +104,7 @@ export default function LoadsPage() {
     try {
       setLoading(true);
       // Fetch orders with container and shipment details
+      // Use explicit FK hints (!column_name) to avoid PostgREST relationship ambiguity
       const { data, error: fetchError } = await supabase
         .from('orders')
         .select(`
@@ -115,7 +116,7 @@ export default function LoadsPage() {
           pickup_appointment,
           delivery_appointment,
           assigned_driver_id,
-          container:containers(
+          container:containers!container_id(
             id,
             container_number,
             size,
@@ -126,7 +127,7 @@ export default function LoadsPage() {
             is_overweight,
             terminal_appointment
           ),
-          shipment:shipments(
+          shipment:shipments!shipment_id(
             id,
             reference_number,
             type,
@@ -137,7 +138,7 @@ export default function LoadsPage() {
             last_free_day,
             port_cutoff
           ),
-          driver:drivers(
+          driver:drivers!assigned_driver_id(
             first_name,
             last_name
           )
