@@ -848,3 +848,17 @@ export interface Equipment {
   created_at: string;
   updated_at: string;
 }
+
+export interface Tractor {
+  id: string;
+  unit_number: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  vin?: string;
+  license_plate?: string;
+  status: 'ACTIVE' | 'AVAILABLE' | 'MAINTENANCE' | 'OUT_OF_SERVICE';
+  current_driver_id?: string;
+  created_at: string;
+  updated_at: string;
+}
