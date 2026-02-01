@@ -94,6 +94,8 @@ export interface Trip {
   status: string;
   order_id?: string;
   load_id?: string;
+  container_id?: string;
+  shipment_id?: string;
   driver_id?: string;
   tractor_id?: string;
   chassis_id?: string;
@@ -113,6 +115,7 @@ export interface Trip {
   is_team_driver?: boolean;
   dispatch_notes?: string;
   created_at?: string;
+  updated_at?: string;
   driver?: Driver;
   tractor?: Tractor;
   legs?: TripLeg[];
@@ -435,6 +438,289 @@ export async function updateTrip(id: string, updates: Partial<Trip>): Promise<bo
 export async function updateTripStatus(id: string, status: string): Promise<boolean> {
   const { error } = await supabase.from('trips').update({ status }).eq('id', id);
   return !error;
+}
+
+// ============================================================================
+// LOCATIONS
+// ============================================================================
+
+export interface Location {
+  id: string;
+  name: string;
+  type: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  latitude?: number;
+  longitude?: number;
+  contact_name?: string;
+  contact_phone?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function getLocations(type?: string): Promise<Location[]> {
+  let query = supabase
+    .from('locations')
+    .select('*')
+    .order('name');
+
+  if (type) {
+    query = query.eq('type', type);
+  }
+
+  const { data, error } = await query;
+  if (error) { console.error('Error fetching locations:', error); return []; }
+  return data || [];
+}
+
+export async function getTerminals(): Promise<Location[]> {
+  return getLocations('TERMINAL');
+}
+
+export async function getYards(): Promise<Location[]> {
+  return getLocations('YARD');
+}
+
+export async function getCustomerLocations(): Promise<Location[]> {
+  return getLocations('CUSTOMER');
+}
+
+export async function createLocation(location: Partial<Location>): Promise<Location | null> {
+  const { data, error } = await supabase
+    .from('locations')
+    .insert(location)
+    .select()
+    .single();
+  if (error) { console.error('Error creating location:', error); return null; }
+  return data;
+}
+
+export async function getAllDispatchLocations(): Promise<{
+  terminals: Location[];
+  yards: Location[];
+  customers: Location[];
+}> {
+  const [terminals, yards, customers] = await Promise.all([
+    getTerminals(),
+    getYards(),
+    getCustomerLocations(),
+  ]);
+  return { terminals, yards, customers };
+}
+
+// ============================================================================
+// MULTI-LEG TRIPS - Container Movement Tracking
+// ============================================================================
+
+export async function getTripsForContainer(containerId: string): Promise<Trip[]> {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      *,
+      driver:drivers(id, first_name, last_name),
+      tractor:tractors(id, unit_number)
+    `)
+    .eq('container_id', containerId)
+    .order('created_at', { ascending: true });
+
+  if (error) { console.error('Error fetching trips for container:', error); return []; }
+
+  // Format driver names
+  return (data || []).map(trip => ({
+    ...trip,
+    driver: trip.driver ? {
+      ...trip.driver,
+      name: `${trip.driver.first_name} ${trip.driver.last_name}`
+    } : null
+  }));
+}
+
+export async function getTripsForShipment(shipmentId: string): Promise<Trip[]> {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      *,
+      driver:drivers(id, first_name, last_name),
+      tractor:tractors(id, unit_number),
+      legs:trip_legs(*)
+    `)
+    .eq('shipment_id', shipmentId)
+    .order('created_at', { ascending: true });
+
+  if (error) { console.error('Error fetching trips for shipment:', error); return []; }
+
+  return (data || []).map(trip => ({
+    ...trip,
+    driver: trip.driver ? {
+      ...trip.driver,
+      name: `${trip.driver.first_name} ${trip.driver.last_name}`
+    } : null
+  }));
+}
+
+export interface CreateTripLegParams {
+  containerId?: string;
+  shipmentId?: string;
+  loadId?: string;
+  driverId: string;
+  tractorId?: string;
+  chassisNumber?: string;
+  chassisPool?: string;
+  tripType: string; // LIVE_LOAD, PRE_PULL, DROP_ONLY, RETURN_EMPTY, etc.
+  fromLocationType: string;
+  fromLocationName: string;
+  fromLocationAddress?: string;
+  toLocationType: string;
+  toLocationName: string;
+  toLocationAddress?: string;
+  scheduledDate?: string;
+  notes?: string;
+}
+
+export async function createContainerTrip(params: CreateTripLegParams): Promise<Trip | null> {
+  const tripNumber = `TRP-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+
+  const tripData = {
+    trip_number: tripNumber,
+    type: params.tripType,
+    status: 'PLANNED',
+    driver_id: params.driverId || null,
+    tractor_id: params.tractorId || null,
+    chassis_number: params.chassisNumber || null,
+    container_id: params.containerId || null,
+    shipment_id: params.shipmentId || null,
+    load_id: params.loadId || null,
+    pickup_location: params.fromLocationName,
+    delivery_location: params.toLocationName,
+    planned_start_time: params.scheduledDate ? new Date(params.scheduledDate).toISOString() : null,
+  };
+
+  const { data: trip, error: tripError } = await supabase
+    .from('trips')
+    .insert(tripData)
+    .select()
+    .single();
+
+  if (tripError) {
+    console.error('Error creating trip:', tripError);
+    return null;
+  }
+
+  // Create trip legs (from and to)
+  const legs = [
+    {
+      trip_id: trip.id,
+      leg_number: 1,
+      leg_type: 'PICKUP',
+      location_type: params.fromLocationType,
+      location_name: params.fromLocationName,
+      location_address: params.fromLocationAddress,
+      status: 'PENDING',
+    },
+    {
+      trip_id: trip.id,
+      leg_number: 2,
+      leg_type: 'DELIVERY',
+      location_type: params.toLocationType,
+      location_name: params.toLocationName,
+      location_address: params.toLocationAddress,
+      status: 'PENDING',
+    },
+  ];
+
+  const { error: legsError } = await supabase
+    .from('trip_legs')
+    .insert(legs);
+
+  if (legsError) {
+    console.error('Error creating trip legs:', legsError);
+    // Still return the trip even if legs failed
+  }
+
+  return trip;
+}
+
+export async function dispatchContainerTrip(tripId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('trips')
+    .update({
+      status: 'DISPATCHED',
+      actual_start_time: new Date().toISOString()
+    })
+    .eq('id', tripId);
+
+  if (error) {
+    console.error('Error dispatching trip:', error);
+    return false;
+  }
+
+  return true;
+}
+
+export async function completeTripLeg(
+  tripId: string,
+  legNumber: number,
+  actualArrival?: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('trip_legs')
+    .update({
+      status: 'COMPLETED',
+      actual_arrival: actualArrival || new Date().toISOString(),
+    })
+    .eq('trip_id', tripId)
+    .eq('leg_number', legNumber);
+
+  if (error) {
+    console.error('Error completing trip leg:', error);
+    return false;
+  }
+
+  return true;
+}
+
+export async function completeTrip(tripId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('trips')
+    .update({
+      status: 'COMPLETED',
+      actual_end_time: new Date().toISOString(),
+    })
+    .eq('id', tripId);
+
+  if (error) {
+    console.error('Error completing trip:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// Get all trips with their legs for a dispatch board view
+export async function getTripsByStatus(statuses: string[]): Promise<Trip[]> {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      *,
+      driver:drivers(id, first_name, last_name),
+      tractor:tractors(id, unit_number),
+      legs:trip_legs(*)
+    `)
+    .in('status', statuses)
+    .order('created_at', { ascending: false });
+
+  if (error) { console.error('Error fetching trips:', error); return []; }
+
+  return (data || []).map(trip => ({
+    ...trip,
+    driver: trip.driver ? {
+      ...trip.driver,
+      name: `${trip.driver.first_name} ${trip.driver.last_name}`
+    } : null
+  }));
 }
 
 // SHIPMENTS

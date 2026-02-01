@@ -1,16 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  Load, LoadCharge, LoadNote, LoadActivityLog, Driver, Equipment,
+import {
+  Load, LoadCharge, LoadNote, LoadActivityLog, Driver, Equipment, Trip,
   LoadStatus, MoveType, ChargeType, LOAD_STATUS_LABELS, TERMINAL_LABELS, SHIPPING_LINE_LABELS
 } from '@/lib/types';
 import {
   getLoadDetails, getShipmentAsLoad, updateLoad, updateLoadStatus, addLoadNote,
   addLoadCharge, autoCalculateCharges, createTrip, generateInvoiceFromLoad,
-  getAvailableDrivers, logLoadActivity
+  getAvailableDrivers, logLoadActivity, getTripsForContainer, getTripsForShipment,
+  dispatchContainerTrip, completeTrip
 } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
+import AddTripModal from './AddTripModal';
 
 interface LoadDetailPanelProps {
   loadId: string;
@@ -26,6 +28,8 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
   const [activeTab, setActiveTab] = useState<Tab>('details');
   const [availableDrivers, setAvailableDrivers] = useState<Driver[]>([]);
   const [tractors, setTractors] = useState<Equipment[]>([]);
+  const [containerTrips, setContainerTrips] = useState<Trip[]>([]);
+  const [showAddTripModal, setShowAddTripModal] = useState(false);
   
   // Form states
   const [newNote, setNewNote] = useState('');
@@ -51,7 +55,8 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
 
   const loadData = async () => {
     setLoading(true);
-    const data = loadId.startsWith('shp:')
+    const isShipment = loadId.startsWith('shp:');
+    const data = isShipment
       ? await getShipmentAsLoad(loadId.slice(4))
       : await getLoadDetails(loadId);
     setLoad(data as any);
@@ -60,6 +65,15 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
         ...prev,
         move_type: (data.move_type || 'LIVE') as MoveType,
       }));
+
+      // Load all trips for this container/shipment
+      if (isShipment) {
+        const trips = await getTripsForShipment(loadId.slice(4));
+        setContainerTrips(trips as any);
+      } else if ((data as any).container_id) {
+        const trips = await getTripsForContainer((data as any).container_id);
+        setContainerTrips(trips as any);
+      }
     }
     setLoading(false);
   };
@@ -485,14 +499,146 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
           </div>
         )}
 
-        {/* Routing Tab */}
+        {/* Routing Tab - Multi-Leg Trip Management */}
         {activeTab === 'routing' && (
           <div className="space-y-4">
-            {load.trip?.legs && load.trip.legs.length > 0 ? (
+            {/* Add Trip Button */}
+            <div className="flex justify-between items-center">
+              <h3 className="font-semibold text-gray-900">Container Movements</h3>
+              <button
+                onClick={() => setShowAddTripModal(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Trip Leg
+              </button>
+            </div>
+
+            {/* All Trips for this Container */}
+            {containerTrips.length > 0 ? (
+              <div className="space-y-4">
+                {containerTrips.map((trip, tripIndex) => (
+                  <div key={trip.id} className="border rounded-lg overflow-hidden">
+                    {/* Trip Header */}
+                    <div className={`p-3 flex items-center justify-between ${
+                      trip.status === 'COMPLETED' ? 'bg-green-50' :
+                      trip.status === 'DISPATCHED' || trip.status === 'EN_ROUTE' ? 'bg-blue-50' :
+                      'bg-gray-50'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        <span className="w-8 h-8 rounded-full bg-gray-900 text-white text-sm flex items-center justify-center font-bold">
+                          {tripIndex + 1}
+                        </span>
+                        <div>
+                          <p className="font-medium text-sm">{trip.trip_number}</p>
+                          <p className="text-xs text-gray-500">
+                            {trip.type?.replace(/_/g, ' ')}
+                            {trip.driver?.name && ` - ${trip.driver.name}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          trip.status === 'COMPLETED' ? 'bg-green-200 text-green-800' :
+                          trip.status === 'DISPATCHED' ? 'bg-blue-200 text-blue-800' :
+                          trip.status === 'EN_ROUTE' ? 'bg-yellow-200 text-yellow-800' :
+                          trip.status === 'PLANNED' ? 'bg-gray-200 text-gray-800' :
+                          'bg-gray-200 text-gray-800'
+                        }`}>
+                          {trip.status}
+                        </span>
+                        {trip.status === 'PLANNED' && (
+                          <button
+                            onClick={async () => {
+                              const success = await dispatchContainerTrip(trip.id);
+                              if (success) loadData();
+                            }}
+                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Dispatch
+                          </button>
+                        )}
+                        {['DISPATCHED', 'EN_ROUTE'].includes(trip.status) && (
+                          <button
+                            onClick={async () => {
+                              const success = await completeTrip(trip.id);
+                              if (success) loadData();
+                            }}
+                            className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Complete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Trip Route */}
+                    <div className="p-3 space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs">
+                          A
+                        </span>
+                        <div className="flex-1">
+                          <p className="font-medium">{trip.pickup_location || 'From'}</p>
+                        </div>
+                      </div>
+                      <div className="ml-3 border-l-2 border-dashed border-gray-300 h-4"></div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs">
+                          B
+                        </span>
+                        <div className="flex-1">
+                          <p className="font-medium">{trip.delivery_location || 'To'}</p>
+                        </div>
+                      </div>
+                      {trip.planned_start && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          Scheduled: {new Date(trip.planned_start).toLocaleString()}
+                        </p>
+                      )}
+                      {trip.notes && (
+                        <p className="text-xs text-gray-500 mt-1 italic">"{trip.notes}"</p>
+                      )}
+                    </div>
+
+                    {/* Trip Legs (if available) */}
+                    {trip.legs && trip.legs.length > 0 && (
+                      <div className="border-t p-3 bg-gray-50">
+                        <p className="text-xs font-medium text-gray-600 mb-2">Detailed Legs:</p>
+                        <div className="space-y-2">
+                          {trip.legs.map((leg: any, legIndex: number) => (
+                            <div key={leg.id} className="flex items-center gap-2 text-xs">
+                              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-white ${
+                                leg.status === 'COMPLETED' ? 'bg-green-500' :
+                                leg.status === 'EN_ROUTE' ? 'bg-yellow-500' :
+                                'bg-gray-400'
+                              }`}>
+                                {legIndex + 1}
+                              </span>
+                              <span className="text-gray-600">{leg.leg_type?.replace(/_/g, ' ')}</span>
+                              <span className="font-medium">{leg.location_name}</span>
+                              <span className={`ml-auto px-1.5 py-0.5 rounded ${
+                                leg.status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>
+                                {leg.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : load.trip?.legs && load.trip.legs.length > 0 ? (
+              /* Fallback to current trip if no containerTrips */
               <div className="space-y-3">
                 {load.trip.legs.map((leg, index) => (
-                  <div 
-                    key={leg.id} 
+                  <div
+                    key={leg.id}
                     className={`p-4 rounded-lg border-2 ${
                       leg.status === 'COMPLETED' ? 'bg-green-50 border-green-300' :
                       leg.status === 'ARRIVED' ? 'bg-blue-50 border-blue-300' :
@@ -543,8 +689,8 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500">
-                <p>No routing configured yet.</p>
-                <p className="text-sm">Dispatch the load to create routing.</p>
+                <p>No trips configured yet.</p>
+                <p className="text-sm">Click "Add Trip Leg" to create a container movement.</p>
               </div>
             )}
           </div>
@@ -775,6 +921,22 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
           )}
         </div>
       </div>
+
+      {/* Add Trip Modal */}
+      {showAddTripModal && (
+        <AddTripModal
+          containerId={loadId.startsWith('shp:') ? undefined : (load as any)?.container_id}
+          shipmentId={loadId.startsWith('shp:') ? loadId.slice(4) : undefined}
+          loadId={loadId.startsWith('shp:') ? undefined : loadId}
+          containerNumber={load.container_number}
+          onClose={() => setShowAddTripModal(false)}
+          onSuccess={() => {
+            setShowAddTripModal(false);
+            loadData();
+            onUpdate();
+          }}
+        />
+      )}
     </div>
   );
 }

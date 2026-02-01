@@ -50,9 +50,31 @@ export type TripStatus =
 
 export type LegStatus = 'PENDING' | 'EN_ROUTE' | 'ARRIVED' | 'COMPLETED' | 'SKIPPED';
 
-export type LegType = 'PICKUP' | 'DELIVERY' | 'RETURN_EMPTY' | 'YARD_DROP' | 'YARD_PICKUP';
+export type LegType = 'PICKUP' | 'DELIVERY' | 'RETURN_EMPTY' | 'YARD_DROP' | 'YARD_PICKUP' | 'TERMINAL_TO_YARD' | 'YARD_TO_CUSTOMER' | 'CUSTOMER_TO_YARD' | 'YARD_TO_TERMINAL';
 
-export type LocationType = 'TERMINAL' | 'WAREHOUSE' | 'DEPOT' | 'YARD' | 'RAIL';
+export type LocationType = 'TERMINAL' | 'WAREHOUSE' | 'DEPOT' | 'YARD' | 'RAIL' | 'CUSTOMER';
+
+// ============================================================================
+// LOCATION TYPES
+// ============================================================================
+
+export interface Location {
+  id: string;
+  name: string;
+  type: LocationType;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  latitude?: number;
+  longitude?: number;
+  contact_name?: string;
+  contact_phone?: string;
+  notes?: string;
+  is_active?: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 export type ChargeType = 
   | 'LINE_HAUL'
@@ -390,8 +412,11 @@ export interface LoadAlert {
 export interface Trip {
   id: string;
   trip_number: string;
-  load_id: string;
-  
+  load_id?: string;
+  container_id?: string;
+  shipment_id?: string;
+  type?: string;
+
   // Assignment
   driver_id?: string;
   tractor_id?: string;
@@ -399,27 +424,36 @@ export interface Trip {
   chassis_number?: string;
   chassis_pool?: ChassisPool;
   chassis_type?: 'STANDARD' | 'TRIAXLE' | 'SLIDER';
-  
+
   // Move type
-  move_type: MoveType;
+  move_type?: MoveType;
   status: TripStatus;
-  
+
+  // From/To for multi-leg trips
+  pickup_location?: string;
+  pickup_location_type?: LocationType;
+  delivery_location?: string;
+  delivery_location_type?: LocationType;
+
   // Driver pay
-  driver_pay_type: 'FLAT' | 'PERCENTAGE' | 'PER_MILE';
+  driver_pay_type?: 'FLAT' | 'PERCENTAGE' | 'PER_MILE';
   driver_base_pay?: number;
-  driver_accessorial_pay: number;
+  driver_accessorial_pay?: number;
   driver_total_pay?: number;
-  
+
   // Dates
+  planned_start?: string;
   scheduled_date?: string;
   started_at?: string;
   completed_at?: string;
-  
+  notes?: string;
+
   created_at: string;
   updated_at: string;
-  
+
   // Relations
   load?: Load;
+  container_number?: string;
   driver?: Driver;
   tractor?: Equipment;
   legs?: TripLeg[];

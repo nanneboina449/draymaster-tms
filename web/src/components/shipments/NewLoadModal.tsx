@@ -88,6 +88,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
     vessel: '',
     voyage: '',
     terminal: '',
+    emptyReturnTerminal: '', // Track where empty container should be returned
     lastFreeDay: '',
     portCutoff: '',
     earliestReturnDate: '',
@@ -315,6 +316,7 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
       vessel: '',
       voyage: '',
       terminal: '',
+      emptyReturnTerminal: '',
       lastFreeDay: '',
       portCutoff: '',
       earliestReturnDate: '',
@@ -667,6 +669,37 @@ export function NewLoadModal({ isOpen, onClose, onSubmit }: NewLoadModalProps) {
                     />
                   </div>
                 </div>
+
+                {/* Empty Return Terminal (for imports) */}
+                {formData.type === 'IMPORT' && (
+                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl">
+                    <label className="block text-sm font-medium text-orange-800 mb-2">
+                      Empty Return Terminal
+                      <span className="ml-2 text-xs text-orange-600 font-normal">(Where to return empty container)</span>
+                    </label>
+                    <select
+                      name="emptyReturnTerminal"
+                      value={formData.emptyReturnTerminal}
+                      onChange={handleInputChange}
+                      className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 bg-white"
+                    >
+                      <option value="">Same as pickup terminal</option>
+                      <option value="APM Terminals">APM Terminals - Pier 400</option>
+                      <option value="LBCT">LBCT - Long Beach</option>
+                      <option value="TraPac">TraPac - Terminal Island</option>
+                      <option value="PCT">PCT - Pacific Container</option>
+                      <option value="Fenix Marine">Fenix Marine Services</option>
+                      <option value="YTI">YTI - Yusen Terminals</option>
+                      <option value="ITS">ITS - Int'l Transportation</option>
+                      <option value="SSA Terminals">SSA Terminals</option>
+                      <option value="DCLI Yard">DCLI Yard - Carson</option>
+                      <option value="TRAC Yard">TRAC Yard - Long Beach</option>
+                    </select>
+                    <p className="text-xs text-orange-600 mt-1">
+                      If different from pickup terminal, select the return location
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
