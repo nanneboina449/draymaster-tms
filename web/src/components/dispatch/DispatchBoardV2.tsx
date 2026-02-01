@@ -96,6 +96,119 @@ const STATUS_COLUMNS = [
   { id: 'COMPLETED', label: 'Completed', color: 'bg-green-100', description: 'Done today' },
 ];
 
+// Container lifecycle - group orders by container
+interface ContainerJourney {
+  container_id: string;
+  container_number: string;
+  container_size?: string;
+  shipment_type?: string;
+  customer_name?: string;
+  terminal_name?: string;
+  last_free_day?: string;
+  is_hazmat?: boolean;
+  is_overweight?: boolean;
+  orders: DispatchOrder[];
+  currentStep: number;
+  totalSteps: number;
+  nextAction?: string;
+  isComplete: boolean;
+}
+
+// Define expected order sequences for each shipment type
+const IMPORT_JOURNEY = ['IMPORT_DELIVERY', 'EMPTY_RETURN'];
+const EXPORT_JOURNEY = ['EMPTY_PICKUP', 'EXPORT_PICKUP'];
+
+// Function to group orders by container and calculate journey progress
+function groupOrdersByContainer(orders: DispatchOrder[]): ContainerJourney[] {
+  const containerMap = new Map<string, DispatchOrder[]>();
+
+  // Group orders by container_id
+  orders.forEach(order => {
+    if (!order.container_id) return;
+    const existing = containerMap.get(order.container_id) || [];
+    existing.push(order);
+    containerMap.set(order.container_id, existing);
+  });
+
+  // Build ContainerJourney objects
+  const journeys: ContainerJourney[] = [];
+
+  containerMap.forEach((containerOrders, containerId) => {
+    // Sort by sequence_number or created_at
+    containerOrders.sort((a, b) => {
+      if (a.sequence_number && b.sequence_number) {
+        return a.sequence_number - b.sequence_number;
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    const firstOrder = containerOrders[0];
+    const shipmentType = firstOrder.shipment_type || 'IMPORT';
+    const expectedJourney = shipmentType === 'EXPORT' ? EXPORT_JOURNEY : IMPORT_JOURNEY;
+
+    // Calculate current step and next action
+    const completedOrders = containerOrders.filter(o => o.status === 'COMPLETED');
+    const inProgressOrders = containerOrders.filter(o => ['DISPATCHED', 'IN_PROGRESS'].includes(o.status));
+    const pendingOrders = containerOrders.filter(o => ['PENDING', 'READY'].includes(o.status));
+
+    // Find where we are in the journey
+    let currentStep = completedOrders.length;
+    if (inProgressOrders.length > 0) currentStep += 0.5; // Halfway through a step
+
+    // Determine what's next
+    let nextAction: string | undefined;
+    if (inProgressOrders.length > 0) {
+      const inProg = inProgressOrders[0];
+      nextAction = `Complete ${MOVE_TYPE_LABELS[inProg.move_type]?.label || inProg.move_type}`;
+    } else if (pendingOrders.length > 0) {
+      const pending = pendingOrders[0];
+      nextAction = `Dispatch ${MOVE_TYPE_LABELS[pending.move_type]?.label || pending.move_type}`;
+    } else if (completedOrders.length === containerOrders.length) {
+      // Check if we need more orders based on expected journey
+      const completedMoveTypes = completedOrders.map(o => o.move_type);
+      const missingSteps = expectedJourney.filter(step => !completedMoveTypes.includes(step));
+      if (missingSteps.length > 0) {
+        nextAction = `Create ${MOVE_TYPE_LABELS[missingSteps[0]]?.label || missingSteps[0]}`;
+      }
+    }
+
+    // Determine if journey is complete
+    const completedMoveTypes = completedOrders.map(o => o.move_type);
+    const isComplete = expectedJourney.every(step => completedMoveTypes.includes(step));
+
+    journeys.push({
+      container_id: containerId,
+      container_number: firstOrder.container_number,
+      container_size: firstOrder.container_size,
+      shipment_type: shipmentType,
+      customer_name: firstOrder.customer_name,
+      terminal_name: firstOrder.terminal_name,
+      last_free_day: firstOrder.last_free_day,
+      is_hazmat: firstOrder.is_hazmat,
+      is_overweight: firstOrder.is_overweight,
+      orders: containerOrders,
+      currentStep,
+      totalSteps: expectedJourney.length,
+      nextAction,
+      isComplete,
+    });
+  });
+
+  // Sort: incomplete first (with urgent at top), then complete
+  journeys.sort((a, b) => {
+    if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
+    // Sort by LFD urgency
+    if (a.last_free_day && b.last_free_day) {
+      return new Date(a.last_free_day).getTime() - new Date(b.last_free_day).getTime();
+    }
+    if (a.last_free_day) return -1;
+    if (b.last_free_day) return 1;
+    return 0;
+  });
+
+  return journeys;
+}
+
 // ============================================================================
 // ORDER CARD COMPONENT
 // ============================================================================
@@ -249,6 +362,258 @@ function OrderCard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// CONTAINER JOURNEY CARD COMPONENT
+// ============================================================================
+
+function ContainerJourneyCard({
+  journey,
+  onOrderClick,
+  onAssignDriver,
+  onCreateTrip,
+  onStatusChange,
+}: {
+  journey: ContainerJourney;
+  onOrderClick: (order: DispatchOrder) => void;
+  onAssignDriver: (order: DispatchOrder) => void;
+  onCreateTrip: (order: DispatchOrder) => void;
+  onStatusChange: (orderId: string, status: string) => void;
+}) {
+  const shipmentType = journey.shipment_type || 'IMPORT';
+  const expectedJourney = shipmentType === 'EXPORT' ? EXPORT_JOURNEY : IMPORT_JOURNEY;
+
+  // Calculate LFD urgency
+  const getLFDUrgency = () => {
+    if (!journey.last_free_day) return null;
+    const lfd = new Date(journey.last_free_day);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diff = Math.ceil((lfd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (diff < 0) return { text: 'OVERDUE', class: 'bg-red-600 text-white', urgent: true };
+    if (diff === 0) return { text: 'TODAY', class: 'bg-red-500 text-white', urgent: true };
+    if (diff === 1) return { text: 'TOMORROW', class: 'bg-orange-500 text-white', urgent: true };
+    if (diff <= 3) return { text: `${diff} days`, class: 'bg-yellow-500 text-white', urgent: true };
+    return { text: `${diff} days`, class: 'bg-gray-200 text-gray-600', urgent: false };
+  };
+
+  const lfdUrgency = getLFDUrgency();
+
+  // Get order for a specific move type
+  const getOrderForMoveType = (moveType: string): DispatchOrder | undefined => {
+    return journey.orders.find(o => o.move_type === moveType);
+  };
+
+  // Render status indicator for each step
+  const renderStepStatus = (moveType: string, stepIndex: number) => {
+    const order = getOrderForMoveType(moveType);
+    const moveInfo = MOVE_TYPE_LABELS[moveType] || { label: moveType, icon: '📋', color: 'bg-gray-100' };
+
+    if (!order) {
+      // Order doesn't exist yet - needs to be created
+      return (
+        <div className="flex items-center gap-2 p-2 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
+          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-400">
+            {stepIndex + 1}
+          </div>
+          <div className="flex-1">
+            <p className="text-sm text-gray-400">{moveInfo.label}</p>
+            <p className="text-xs text-gray-400">Not created yet</p>
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              // Could trigger create order flow here
+            }}
+            className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+          >
+            + Create
+          </button>
+        </div>
+      );
+    }
+
+    // Determine status
+    let statusColor = 'bg-gray-200';
+    let statusText = 'Pending';
+    let statusIcon = '○';
+
+    if (order.status === 'COMPLETED') {
+      statusColor = 'bg-green-500';
+      statusText = 'Done';
+      statusIcon = '✓';
+    } else if (order.status === 'IN_PROGRESS') {
+      statusColor = 'bg-yellow-500';
+      statusText = 'In Progress';
+      statusIcon = '►';
+    } else if (order.status === 'DISPATCHED') {
+      statusColor = 'bg-blue-500';
+      statusText = 'Dispatched';
+      statusIcon = '→';
+    }
+
+    return (
+      <div
+        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:shadow-sm transition ${
+          order.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
+          order.status === 'IN_PROGRESS' ? 'bg-yellow-50 border-yellow-200' :
+          order.status === 'DISPATCHED' ? 'bg-blue-50 border-blue-200' :
+          'bg-white border-gray-200'
+        }`}
+        onClick={() => onOrderClick(order)}
+      >
+        <div className={`w-8 h-8 rounded-full ${statusColor} flex items-center justify-center text-white text-sm font-medium`}>
+          {statusIcon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">{moveInfo.label}</p>
+            <span className="text-xs text-gray-400">#{order.order_number}</span>
+          </div>
+          <p className="text-xs text-gray-500 truncate">
+            {order.status === 'COMPLETED' ? (
+              `Completed ${order.completed_at ? new Date(order.completed_at).toLocaleDateString() : ''}`
+            ) : order.assigned_driver_name ? (
+              `Driver: ${order.assigned_driver_name}`
+            ) : (
+              `${order.pickup_city || 'Pickup'} → ${order.delivery_city || 'Delivery'}`
+            )}
+          </p>
+        </div>
+
+        {/* Quick Actions */}
+        {order.status === 'PENDING' && !order.assigned_driver_id && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (['IMPORT_DELIVERY', 'YARD_DELIVERY'].includes(order.move_type)) {
+                onCreateTrip(order);
+              } else {
+                onAssignDriver(order);
+              }
+            }}
+            className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Dispatch
+          </button>
+        )}
+        {order.status === 'DISPATCHED' && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onStatusChange(order.id, 'IN_PROGRESS');
+            }}
+            className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
+          >
+            Start
+          </button>
+        )}
+        {order.status === 'IN_PROGRESS' && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onStatusChange(order.id, 'COMPLETED');
+            }}
+            className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+          >
+            Complete
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${
+      journey.isComplete ? 'border-green-300' : lfdUrgency?.urgent ? 'border-orange-300' : 'border-gray-200'
+    }`}>
+      {/* Header */}
+      <div className={`px-4 py-3 ${
+        journey.isComplete ? 'bg-green-50' :
+        lfdUrgency?.urgent ? 'bg-orange-50' :
+        'bg-gray-50'
+      }`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-bold text-lg">{journey.container_number}</span>
+              {journey.is_hazmat && <span title="Hazmat" className="text-lg">☣️</span>}
+              {journey.is_overweight && <span title="Overweight" className="text-lg">⚖️</span>}
+            </div>
+            <span className={`text-xs px-2 py-1 rounded-full ${
+              shipmentType === 'IMPORT' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'
+            }`}>
+              {shipmentType}
+            </span>
+            {journey.container_size && (
+              <span className="text-xs text-gray-500">{journey.container_size}'</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {lfdUrgency && (
+              <span className={`px-2 py-1 rounded text-xs font-medium ${lfdUrgency.class}`}>
+                LFD: {lfdUrgency.text}
+              </span>
+            )}
+            {journey.isComplete && (
+              <span className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium">
+                ✓ Complete
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="mt-1 flex items-center gap-4 text-sm text-gray-600">
+          <span>{journey.customer_name || 'No Customer'}</span>
+          <span className="text-gray-300">|</span>
+          <span>{journey.terminal_name || 'No Terminal'}</span>
+        </div>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="px-4 py-2 bg-gray-100">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Journey Progress</span>
+          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all ${journey.isComplete ? 'bg-green-500' : 'bg-indigo-500'}`}
+              style={{ width: `${(journey.currentStep / journey.totalSteps) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs font-medium text-gray-600">
+            {Math.floor(journey.currentStep)}/{journey.totalSteps}
+          </span>
+        </div>
+      </div>
+
+      {/* Journey Steps */}
+      <div className="p-4">
+        <div className="space-y-2">
+          {expectedJourney.map((moveType, index) => (
+            <div key={moveType}>
+              {renderStepStatus(moveType, index)}
+              {index < expectedJourney.length - 1 && (
+                <div className="flex items-center ml-4 my-1">
+                  <div className="w-px h-4 bg-gray-300"></div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Next Action Callout */}
+        {journey.nextAction && !journey.isComplete && (
+          <div className="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-indigo-600">👉</span>
+              <span className="text-sm font-medium text-indigo-700">Next: {journey.nextAction}</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -472,6 +837,7 @@ export default function DispatchBoardV2() {
   const [creatingTripFor, setCreatingTripFor] = useState<DispatchOrder | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'IMPORT' | 'EXPORT' | 'URGENT' | 'EMPTY_RETURN'>('ALL');
   const [showEmptyPanel, setShowEmptyPanel] = useState(true);
+  const [viewMode, setViewMode] = useState<'orders' | 'containers'>('containers'); // Default to container view
 
   // Load data
   const loadData = useCallback(async () => {
@@ -675,6 +1041,32 @@ export default function DispatchBoardV2() {
       <div className="bg-white border-b px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h2 className="font-semibold text-gray-900">Dispatch Board</h2>
+
+          {/* View Mode Toggle */}
+          <div className="flex bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('containers')}
+              className={`px-3 py-1.5 text-sm rounded-md transition font-medium ${
+                viewMode === 'containers'
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              📦 Container Journey
+            </button>
+            <button
+              onClick={() => setViewMode('orders')}
+              className={`px-3 py-1.5 text-sm rounded-md transition font-medium ${
+                viewMode === 'orders'
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              📋 Order Board
+            </button>
+          </div>
+
+          {/* Filters */}
           <div className="flex gap-1">
             {(['ALL', 'IMPORT', 'EXPORT', 'EMPTY_RETURN', 'URGENT'] as const).map(f => (
               <button
@@ -693,7 +1085,10 @@ export default function DispatchBoardV2() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">
-            {filteredOrders.length} orders
+            {viewMode === 'containers'
+              ? `${groupOrdersByContainer(filteredOrders).length} containers`
+              : `${filteredOrders.length} orders`
+            }
           </span>
           <button
             onClick={loadData}
@@ -709,42 +1104,103 @@ export default function DispatchBoardV2() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Kanban Columns */}
-        <div className="flex-1 flex gap-4 p-4 overflow-x-auto">
-          {STATUS_COLUMNS.map(column => (
-            <div key={column.id} className="flex-1 min-w-[280px] max-w-[350px] flex flex-col">
-              {/* Column Header */}
-              <div className={`${column.color} rounded-t-lg px-3 py-2 flex items-center justify-between`}>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{column.label}</span>
-                  <span className="bg-white/50 px-2 py-0.5 rounded-full text-xs">
-                    {ordersByStatus[column.id]?.length || 0}
-                  </span>
+        {/* Container Journey View */}
+        {viewMode === 'containers' ? (
+          <div className="flex-1 p-4 overflow-y-auto">
+            {/* Summary Stats */}
+            <div className="mb-4 grid grid-cols-4 gap-4">
+              {(() => {
+                const journeys = groupOrdersByContainer(filteredOrders);
+                const complete = journeys.filter(j => j.isComplete).length;
+                const inProgress = journeys.filter(j => !j.isComplete && j.orders.some(o => ['DISPATCHED', 'IN_PROGRESS'].includes(o.status))).length;
+                const pending = journeys.filter(j => !j.isComplete && j.orders.every(o => ['PENDING', 'READY'].includes(o.status))).length;
+                const urgent = journeys.filter(j => {
+                  if (j.isComplete || !j.last_free_day) return false;
+                  const lfd = new Date(j.last_free_day);
+                  const today = new Date();
+                  const diff = Math.ceil((lfd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                  return diff <= 2;
+                }).length;
+                return (
+                  <>
+                    <div className="bg-white rounded-lg p-3 border shadow-sm">
+                      <p className="text-xs text-gray-500 uppercase">Total Containers</p>
+                      <p className="text-2xl font-bold text-gray-900">{journeys.length}</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200 shadow-sm">
+                      <p className="text-xs text-yellow-600 uppercase">In Progress</p>
+                      <p className="text-2xl font-bold text-yellow-700">{inProgress}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 border shadow-sm">
+                      <p className="text-xs text-gray-500 uppercase">Pending Start</p>
+                      <p className="text-2xl font-bold text-gray-700">{pending}</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-3 border border-green-200 shadow-sm">
+                      <p className="text-xs text-green-600 uppercase">Complete</p>
+                      <p className="text-2xl font-bold text-green-700">{complete}</p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Container Journey Cards */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {groupOrdersByContainer(filteredOrders).map(journey => (
+                <ContainerJourneyCard
+                  key={journey.container_id}
+                  journey={journey}
+                  onOrderClick={(order) => setSelectedOrder(order)}
+                  onAssignDriver={(order) => setAssigningOrder(order)}
+                  onCreateTrip={(order) => setCreatingTripFor(order)}
+                  onStatusChange={handleStatusChange}
+                />
+              ))}
+              {groupOrdersByContainer(filteredOrders).length === 0 && (
+                <div className="col-span-full text-center py-12 text-gray-400">
+                  No containers found
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Kanban Order View */
+          <div className="flex-1 flex gap-4 p-4 overflow-x-auto">
+            {STATUS_COLUMNS.map(column => (
+              <div key={column.id} className="flex-1 min-w-[280px] max-w-[350px] flex flex-col">
+                {/* Column Header */}
+                <div className={`${column.color} rounded-t-lg px-3 py-2 flex items-center justify-between`}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{column.label}</span>
+                    <span className="bg-white/50 px-2 py-0.5 rounded-full text-xs">
+                      {ordersByStatus[column.id]?.length || 0}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Column Content */}
+                <div className="flex-1 bg-gray-50 rounded-b-lg p-2 overflow-y-auto space-y-2">
+                  {ordersByStatus[column.id]?.length > 0 ? (
+                    ordersByStatus[column.id].map(order => (
+                      <OrderCard
+                        key={order.id}
+                        order={order}
+                        onEdit={() => setSelectedOrder(order)}
+                        onAssignDriver={() => setAssigningOrder(order)}
+                        onCreateTrip={() => setCreatingTripFor(order)}
+                        onStatusChange={(status) => handleStatusChange(order.id, status)}
+                      />
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-400 text-sm">
+                      No orders
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {/* Column Content */}
-              <div className="flex-1 bg-gray-50 rounded-b-lg p-2 overflow-y-auto space-y-2">
-                {ordersByStatus[column.id]?.length > 0 ? (
-                  ordersByStatus[column.id].map(order => (
-                    <OrderCard
-                      key={order.id}
-                      order={order}
-                      onEdit={() => setSelectedOrder(order)}
-                      onAssignDriver={() => setAssigningOrder(order)}
-                      onCreateTrip={() => setCreatingTripFor(order)}
-                      onStatusChange={(status) => handleStatusChange(order.id, status)}
-                    />
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-gray-400 text-sm">
-                    No orders
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Right Sidebar */}
         <div className="w-80 border-l bg-gray-50 p-4 overflow-y-auto space-y-4">
