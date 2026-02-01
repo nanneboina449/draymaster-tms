@@ -2,22 +2,23 @@
 -- Migration 015: Fix Automation Triggers
 -- ==============================================================================
 -- Fixes:
--- 1. Change auto_calculate_load_charges to use order_charges table (not load_charges)
--- 2. Add missing container lifecycle status values
--- 3. Ensure proper column sizes for status fields
+-- 1. Add missing columns to invoice_line_items table
+-- 2. Change auto_calculate_load_charges to use order_charges table (not load_charges)
 
 -- ==============================================================================
--- 1. ADD MISSING CONTAINER LIFECYCLE STATUS VALUES
+-- 0. ADD MISSING COLUMNS TO INVOICE_LINE_ITEMS
 -- ==============================================================================
 
--- Add container lifecycle status values used by triggers
-ALTER TABLE containers ALTER COLUMN lifecycle_status TYPE VARCHAR(30);
+-- The auto_generate_invoice trigger needs these columns
+ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS service_date DATE;
+ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS unit_rate DECIMAL(10,2);
+ALTER TABLE invoice_line_items ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100);
 
 -- ==============================================================================
--- 2. FIX AUTO LOAD CHARGES TO USE ORDER_CHARGES TABLE
+-- 1. FIX AUTO LOAD CHARGES TO USE ORDER_CHARGES TABLE
 -- ==============================================================================
 
--- Drop old trigger
+-- Drop old trigger first
 DROP TRIGGER IF EXISTS trg_auto_load_charges ON orders;
 
 -- Replace function to use order_charges instead of load_charges
@@ -29,7 +30,7 @@ DECLARE
     v_fuel_rate DECIMAL(5,2) := 0.08; -- 8% default
 BEGIN
     -- Only trigger when order is dispatched
-    IF NEW.status = 'DISPATCHED' AND OLD.status != 'DISPATCHED' THEN
+    IF NEW.status = 'DISPATCHED' AND (OLD IS NULL OR OLD.status != 'DISPATCHED') THEN
 
         -- Get container details
         SELECT c.*, s.customer_id
@@ -38,56 +39,55 @@ BEGIN
         JOIN shipments s ON c.shipment_id = s.id
         WHERE c.id = NEW.container_id;
 
-        -- Get base rate for this lane/customer
-        SELECT COALESCE(
-            CASE v_container.size
-                WHEN '20' THEN rl.rate_20ft
-                WHEN '40' THEN rl.rate_40ft
-                WHEN '40HC' THEN rl.rate_40hc
-                WHEN '45' THEN rl.rate_45ft
-                ELSE rl.rate_40ft
-            END,
-            350.00
-        ) INTO v_base_rate
-        FROM rate_lanes rl
-        WHERE (rl.customer_id = v_container.customer_id OR rl.customer_id IS NULL)
-        AND rl.is_active = TRUE
-        ORDER BY rl.customer_id NULLS LAST
-        LIMIT 1;
+        -- Set default base rate
+        v_base_rate := 350.00;
+
+        -- Try to get customer-specific rate
+        IF v_container IS NOT NULL THEN
+            SELECT COALESCE(
+                CASE v_container.size
+                    WHEN '20' THEN rl.rate_20ft
+                    WHEN '40' THEN rl.rate_40ft
+                    WHEN '40HC' THEN rl.rate_40hc
+                    WHEN '45' THEN rl.rate_45ft
+                    ELSE rl.rate_40ft
+                END,
+                350.00
+            ) INTO v_base_rate
+            FROM rate_lanes rl
+            WHERE (rl.customer_id = v_container.customer_id OR rl.customer_id IS NULL)
+            AND rl.is_active = TRUE
+            ORDER BY rl.customer_id NULLS LAST
+            LIMIT 1;
+        END IF;
 
         IF v_base_rate IS NULL THEN
             v_base_rate := 350.00;
         END IF;
 
-        -- Delete existing auto-calculated charges from ORDER_CHARGES (not load_charges)
+        -- Delete existing auto-calculated charges from ORDER_CHARGES (not load_charges!)
         DELETE FROM order_charges
         WHERE order_id = NEW.id
         AND auto_calculated = TRUE;
 
         -- Add line haul charge
         INSERT INTO order_charges (order_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
-        VALUES (NEW.id, 'LINE_HAUL', 'Transportation - ' || COALESCE(v_container.container_number, 'N/A'), 1, v_base_rate, v_base_rate, 'CUSTOMER', TRUE);
+        VALUES (NEW.id, 'LINE_HAUL', 'Transportation', 1, v_base_rate, v_base_rate, 'CUSTOMER', TRUE);
 
         -- Add fuel surcharge
         INSERT INTO order_charges (order_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
         VALUES (NEW.id, 'FUEL_SURCHARGE', 'Fuel Surcharge (8%)', 1, v_base_rate * v_fuel_rate, v_base_rate * v_fuel_rate, 'CUSTOMER', TRUE);
 
         -- Add hazmat surcharge if applicable
-        IF v_container.is_hazmat = TRUE THEN
+        IF v_container IS NOT NULL AND v_container.is_hazmat = TRUE THEN
             INSERT INTO order_charges (order_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
             VALUES (NEW.id, 'HAZMAT', 'Hazmat Handling', 1, 75.00, 75.00, 'CUSTOMER', TRUE);
         END IF;
 
         -- Add overweight surcharge if applicable
-        IF v_container.is_overweight = TRUE OR COALESCE(v_container.weight_lbs, 0) > 44000 THEN
+        IF v_container IS NOT NULL AND (v_container.is_overweight = TRUE OR COALESCE(v_container.weight_lbs, 0) > 44000) THEN
             INSERT INTO order_charges (order_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
             VALUES (NEW.id, 'OVERWEIGHT', 'Overweight Container', 1, 100.00, 100.00, 'CUSTOMER', TRUE);
-        END IF;
-
-        -- Add reefer surcharge if applicable
-        IF v_container.is_reefer = TRUE THEN
-            INSERT INTO order_charges (order_id, charge_type, description, quantity, unit_rate, amount, billable_to, auto_calculated)
-            VALUES (NEW.id, 'REEFER', 'Reefer Monitoring', 1, 50.00, 50.00, 'CUSTOMER', TRUE);
         END IF;
 
         -- Update order total charges
@@ -111,10 +111,9 @@ CREATE TRIGGER trg_auto_load_charges
     EXECUTE FUNCTION auto_calculate_load_charges();
 
 -- ==============================================================================
--- 3. ENSURE TRIGGER ALSO WORKS ON INSERT (for direct DISPATCHED inserts)
+-- 2. ENSURE TRIGGER ALSO WORKS ON INSERT (for direct DISPATCHED inserts)
 -- ==============================================================================
 
--- Create INSERT trigger as well
 DROP TRIGGER IF EXISTS trg_auto_load_charges_insert ON orders;
 CREATE TRIGGER trg_auto_load_charges_insert
     AFTER INSERT ON orders
@@ -123,7 +122,7 @@ CREATE TRIGGER trg_auto_load_charges_insert
     EXECUTE FUNCTION auto_calculate_load_charges();
 
 -- ==============================================================================
--- 4. FIX SYNC_CONTAINER_LIFECYCLE FOR SAFE STATUS VALUES
+-- 3. FIX SYNC_CONTAINER_LIFECYCLE - Use only valid status values
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION sync_container_lifecycle()
@@ -134,37 +133,15 @@ BEGIN
         UPDATE containers
         SET lifecycle_status = CASE NEW.status
             WHEN 'DISPATCHED' THEN 'PICKED_UP'
-            WHEN 'IN_PROGRESS' THEN
-                CASE NEW.move_type_v2
-                    WHEN 'IMPORT_DELIVERY' THEN 'PICKED_UP'
-                    WHEN 'EMPTY_RETURN' THEN 'PICKED_UP'
-                    ELSE COALESCE(lifecycle_status, 'PICKED_UP')
-                END
+            WHEN 'IN_PROGRESS' THEN 'PICKED_UP'
             WHEN 'DELIVERED' THEN
                 CASE NEW.move_type_v2
                     WHEN 'IMPORT_DELIVERY' THEN 'DELIVERED'
                     WHEN 'EMPTY_RETURN' THEN 'RETURNED'
-                    ELSE COALESCE(lifecycle_status, 'DELIVERED')
+                    ELSE 'DELIVERED'
                 END
-            WHEN 'COMPLETED' THEN
-                CASE NEW.move_type_v2
-                    WHEN 'EMPTY_RETURN' THEN 'COMPLETED'
-                    ELSE 'COMPLETED'
-                END
-            ELSE COALESCE(lifecycle_status, 'BOOKED')
-        END,
-        -- Update gate times
-        gate_out_at = CASE
-            WHEN NEW.status = 'IN_PROGRESS' AND gate_out_at IS NULL
-            THEN NOW()
-            ELSE gate_out_at
-        END,
-        gate_in_at = CASE
-            WHEN NEW.status IN ('COMPLETED', 'DELIVERED')
-            AND NEW.move_type_v2 = 'EMPTY_RETURN'
-            AND gate_in_at IS NULL
-            THEN NOW()
-            ELSE gate_in_at
+            WHEN 'COMPLETED' THEN 'COMPLETED'
+            ELSE lifecycle_status
         END,
         updated_at = NOW()
         WHERE id = NEW.container_id;
@@ -177,5 +154,5 @@ $$ LANGUAGE plpgsql;
 -- Success message
 DO $$
 BEGIN
-    RAISE NOTICE 'Migration 015: Automation triggers fixed successfully';
+    RAISE NOTICE 'Migration 015: Automation triggers fixed - using order_charges table';
 END $$;

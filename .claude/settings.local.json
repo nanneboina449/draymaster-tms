@@ -22,7 +22,11 @@
       "Bash(git reset:*)",
       "Bash(git restore:*)",
       "Bash(git push:*)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx:*)",
+      "Bash(pushd:*)",
+      "Bash(popd:*)"
     ]
   }
 }
