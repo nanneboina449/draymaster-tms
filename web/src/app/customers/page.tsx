@@ -7,7 +7,7 @@ import { ErrorAlert, EmptyState, parseError, showToast } from '../../components/
 
 interface Customer {
   id: string;
-  name: string;
+  company_name: string;
   code: string;
   city: string;
   state: string;
@@ -26,7 +26,7 @@ export default function CustomersPage() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
-    name: '', code: '', city: '', state: '',
+    company_name: '', code: '', city: '', state: '',
     contact_name: '', contact_phone: '', contact_email: '',
     payment_terms: '30', is_active: true
   });
@@ -37,7 +37,7 @@ export default function CustomersPage() {
     try {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase.from('customers').select('*').order('name');
+      const { data, error } = await supabase.from('customers').select('*').order('company_name');
       if (error) throw error;
       setCustomers(data || []);
     } catch (err: unknown) {
@@ -83,22 +83,22 @@ export default function CustomersPage() {
     if (customer) {
       setEditingCustomer(customer);
       setFormData({
-        name: customer.name, code: customer.code || '', city: customer.city || '', state: customer.state || '',
+        company_name: customer.company_name, code: customer.code || '', city: customer.city || '', state: customer.state || '',
         contact_name: customer.contact_name || '', contact_phone: customer.contact_phone || '',
         contact_email: customer.contact_email || '', payment_terms: String(customer.payment_terms || 30),
         is_active: customer.is_active
       });
     } else {
       setEditingCustomer(null);
-      setFormData({ name: '', code: '', city: '', state: '', contact_name: '', contact_phone: '', contact_email: '', payment_terms: '30', is_active: true });
+      setFormData({ company_name: '', code: '', city: '', state: '', contact_name: '', contact_phone: '', contact_email: '', payment_terms: '30', is_active: true });
     }
     setIsModalOpen(true);
   };
 
   const closeModal = () => { setIsModalOpen(false); setEditingCustomer(null); };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const filteredCustomers = customers.filter(c =>
+    c.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.code?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -164,7 +164,7 @@ export default function CustomersPage() {
             <tbody className="divide-y divide-gray-200">
               {filteredCustomers.map((customer) => (
                 <tr key={customer.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 font-medium">{customer.name}</td>
+                  <td className="px-6 py-4 font-medium">{customer.company_name}</td>
                   <td className="px-6 py-4"><span className="px-2 py-1 bg-gray-100 rounded font-mono text-sm">{customer.code || '-'}</span></td>
                   <td className="px-6 py-4 text-gray-500">{customer.city}, {customer.state}</td>
                   <td className="px-6 py-4"><div className="text-sm">{customer.contact_name || '-'}</div><div className="text-xs text-gray-500">{customer.contact_phone}</div></td>
@@ -190,7 +190,7 @@ export default function CustomersPage() {
                 <h2 className="text-xl font-bold text-white">{editingCustomer ? 'Edit' : 'Add'} Customer</h2>
               </div>
               <div className="p-6 space-y-4">
-                <div><label className="block text-sm font-medium mb-1">Company Name *</label><input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
+                <div><label className="block text-sm font-medium mb-1">Company Name *</label><input value={formData.company_name} onChange={e => setFormData({...formData, company_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="block text-sm font-medium mb-1">Code</label><input value={formData.code} onChange={e => setFormData({...formData, code: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg font-mono" maxLength={10} /></div>
                   <div><label className="block text-sm font-medium mb-1">Payment Terms</label><select value={formData.payment_terms} onChange={e => setFormData({...formData, payment_terms: e.target.value})} className="w-full px-4 py-2 border rounded-lg">
