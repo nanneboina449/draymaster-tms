@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useState } from 'react';
-import DispatchBoard from '@/components/dispatch/DispatchBoard';
+import DispatchBoardV2 from '@/components/dispatch/DispatchBoardV2';
 import OrderEntryForm from '@/components/dispatch/OrderEntryForm';
 import { AlertBanner, NotificationBell } from '@/components/notifications/NotificationCenter';
 
@@ -36,7 +36,7 @@ export default function DispatchPage() {
 
       {/* Main Dispatch Board */}
       <main className="flex-1 overflow-hidden">
-        <DispatchBoard />
+        <DispatchBoardV2 />
       </main>
 
       {/* Order Entry Modal */}

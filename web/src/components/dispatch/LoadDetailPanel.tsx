@@ -929,6 +929,8 @@ export default function LoadDetailPanel({ loadId, onClose, onUpdate }: LoadDetai
           shipmentId={loadId.startsWith('shp:') ? loadId.slice(4) : undefined}
           loadId={loadId.startsWith('shp:') ? undefined : loadId}
           containerNumber={load.container_number}
+          terminalName={load.terminal ? TERMINAL_LABELS[load.terminal] : (load as any).terminal_name}
+          deliveryAddress={load.order?.location_address}
           onClose={() => setShowAddTripModal(false)}
           onSuccess={() => {
             setShowAddTripModal(false);
