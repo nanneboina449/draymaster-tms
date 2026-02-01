@@ -1536,6 +1536,32 @@ export async function getShipmentAsLoad(containerId: string): Promise<Load | nul
     .limit(1)
     .single();
 
+  // Get the first order for this container to get appointment info
+  const { data: order } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('container_id', containerId)
+    .order('sequence_number', { ascending: true })
+    .limit(1)
+    .single();
+
+  // Parse appointment timestamps into separate date/time fields for LoadDetailPanel
+  let deliveryAppointmentDate = null;
+  let deliveryAppointmentTime = null;
+  if (order?.delivery_appointment) {
+    const dt = new Date(order.delivery_appointment);
+    deliveryAppointmentDate = dt.toISOString().split('T')[0];
+    deliveryAppointmentTime = dt.toTimeString().slice(0, 5);
+  }
+
+  let pickupAppointmentDate = null;
+  let pickupAppointmentTime = null;
+  if (order?.pickup_appointment) {
+    const dt = new Date(order.pickup_appointment);
+    pickupAppointmentDate = dt.toISOString().split('T')[0];
+    pickupAppointmentTime = dt.toTimeString().slice(0, 5);
+  }
+
   return {
     id: `shp:${containerId}`,
     load_number: shipment?.reference_number || '',
@@ -1575,6 +1601,12 @@ export async function getShipmentAsLoad(containerId: string): Promise<Load | nul
       location_state: shipment?.delivery_state,
     } as any,
     trip: trip || undefined,
+    // Appointment data from orders table
+    terminal_appointment_date: pickupAppointmentDate,
+    terminal_appointment_time: pickupAppointmentTime,
+    delivery_appointment_date: deliveryAppointmentDate,
+    delivery_appointment_time: deliveryAppointmentTime,
+    delivery_appointment_required: order?.delivery_appointment_required || false,
     created_at: shipment?.created_at || '',
     updated_at: shipment?.created_at || '',
   } as unknown as Load;
@@ -1693,6 +1725,9 @@ export async function createShipmentWithOrders(
     zip?: string;
     contactName?: string;
     contactPhone?: string;
+    appointmentRequired?: boolean;
+    appointmentDate?: string;
+    appointmentTime?: string;
   }
 ): Promise<Shipment | null> {
   // 1. Create shipment
@@ -1768,9 +1803,17 @@ async function createOrdersForContainer(
     zip?: string;
     contactName?: string;
     contactPhone?: string;
+    appointmentRequired?: boolean;
+    appointmentDate?: string;
+    appointmentTime?: string;
   }
 ): Promise<void> {
   const orderNumber = () => `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+
+  // Build delivery appointment timestamp if date is provided
+  const deliveryAppointment = deliveryInfo?.appointmentDate
+    ? `${deliveryInfo.appointmentDate}T${deliveryInfo.appointmentTime || '08:00'}:00`
+    : null;
 
   if (shipmentType === 'IMPORT') {
     // Order 1: Import Delivery (terminal → customer)
@@ -1790,6 +1833,8 @@ async function createOrdersForContainer(
       delivery_zip: deliveryInfo?.zip,
       delivery_contact_name: deliveryInfo?.contactName,
       delivery_contact_phone: deliveryInfo?.contactPhone,
+      delivery_appointment: deliveryAppointment,
+      delivery_appointment_required: deliveryInfo?.appointmentRequired || false,
     });
 
     // If DROP type, create Order 2: Empty Return
@@ -1844,6 +1889,8 @@ async function createOrdersForContainer(
       pickup_city: deliveryInfo?.city,
       pickup_state: deliveryInfo?.state,
       pickup_zip: deliveryInfo?.zip,
+      pickup_appointment: deliveryAppointment,
+      pickup_appointment_required: deliveryInfo?.appointmentRequired || false,
     });
   }
 }

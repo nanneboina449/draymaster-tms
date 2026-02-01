@@ -81,6 +81,9 @@ export default function OrdersPage() {
         zip: formData.deliveryLocation?.zip,
         contactName: formData.deliveryLocation?.contactName,
         contactPhone: formData.deliveryLocation?.contactPhone,
+        appointmentRequired: formData.deliveryLocation?.appointmentRequired,
+        appointmentDate: formData.deliveryLocation?.appointmentDate,
+        appointmentTime: formData.deliveryLocation?.appointmentTime,
       });
 
       await fetchShipments();
