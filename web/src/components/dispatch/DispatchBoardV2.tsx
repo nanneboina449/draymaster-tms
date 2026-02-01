@@ -6,6 +6,7 @@ import { Driver, Tractor } from '@/lib/types';
 import EditOrderModal from './EditOrderModal';
 import CreateTripModal from './CreateTripModal';
 import EmptyReadyPanel from './EmptyReadyPanel';
+import DispatchModal from './DispatchModal';
 
 // ============================================================================
 // TYPES
@@ -19,15 +20,17 @@ interface DispatchOrder {
   trip_execution_type?: string;
   sequence_number?: number;
 
-  // Container info
+  // Container info (Load)
   container_id: string;
   container_number: string;
   container_size?: string;
+  container_type?: string;
   is_hazmat?: boolean;
   is_overweight?: boolean;
+  weight_lbs?: number;
   customs_status?: string;
 
-  // Shipment info
+  // Shipment info (Order/Booking)
   shipment_id: string;
   shipment_reference?: string;
   shipment_type?: string;
@@ -35,6 +38,8 @@ interface DispatchOrder {
   steamship_line?: string;
   last_free_day?: string;
   customer_name?: string;
+  booking_number?: string;
+  bill_of_lading?: string;
 
   // Locations
   pickup_address?: string;
@@ -96,100 +101,155 @@ const STATUS_COLUMNS = [
   { id: 'COMPLETED', label: 'Completed', color: 'bg-green-100', description: 'Done today' },
 ];
 
-// Container lifecycle - group orders by container
-interface ContainerJourney {
+// Load lifecycle - group legs by container (Load = Container in drayage)
+interface LoadJourney {
   container_id: string;
   container_number: string;
   container_size?: string;
+  shipment_id: string;
   shipment_type?: string;
   customer_name?: string;
   terminal_name?: string;
+  delivery_address?: string;
+  delivery_city?: string;
+  booking_number?: string;
+  bill_of_lading?: string;
   last_free_day?: string;
+  steamship_line?: string;
   is_hazmat?: boolean;
   is_overweight?: boolean;
-  orders: DispatchOrder[];
+  weight_lbs?: number;
+  legs: DispatchOrder[];  // Renamed from orders → legs
   currentStep: number;
   totalSteps: number;
   nextAction?: string;
+  nextLegType?: string;
   isComplete: boolean;
 }
 
-// Define expected order sequences for each shipment type
+// For dispatch modal
+interface DispatchTarget {
+  container: {
+    id: string;
+    container_number: string;
+    size?: string;
+    type?: string;
+    is_hazmat?: boolean;
+    is_overweight?: boolean;
+    weight_lbs?: number;
+    customs_status?: string;
+  };
+  shipment: {
+    id: string;
+    reference_number?: string;
+    type: 'IMPORT' | 'EXPORT';
+    customer_name?: string;
+    terminal_name?: string;
+    delivery_address?: string;
+    delivery_city?: string;
+    delivery_state?: string;
+    booking_number?: string;
+    bill_of_lading?: string;
+    last_free_day?: string;
+    steamship_line?: string;
+  };
+  existingLeg?: {
+    id: string;
+    order_number: string;
+    move_type: string;
+    pickup_address?: string;
+    pickup_city?: string;
+    delivery_address?: string;
+    delivery_city?: string;
+  };
+}
+
+// Define expected leg sequences for each shipment type
 const IMPORT_JOURNEY = ['IMPORT_DELIVERY', 'EMPTY_RETURN'];
 const EXPORT_JOURNEY = ['EMPTY_PICKUP', 'EXPORT_PICKUP'];
 
-// Function to group orders by container and calculate journey progress
-function groupOrdersByContainer(orders: DispatchOrder[]): ContainerJourney[] {
-  const containerMap = new Map<string, DispatchOrder[]>();
+// Function to group legs by container (Load) and calculate journey progress
+function groupLegsByLoad(legs: DispatchOrder[]): LoadJourney[] {
+  const loadMap = new Map<string, DispatchOrder[]>();
 
-  // Group orders by container_id
-  orders.forEach(order => {
-    if (!order.container_id) return;
-    const existing = containerMap.get(order.container_id) || [];
-    existing.push(order);
-    containerMap.set(order.container_id, existing);
+  // Group legs by container_id (each container = 1 load)
+  legs.forEach(leg => {
+    if (!leg.container_id) return;
+    const existing = loadMap.get(leg.container_id) || [];
+    existing.push(leg);
+    loadMap.set(leg.container_id, existing);
   });
 
-  // Build ContainerJourney objects
-  const journeys: ContainerJourney[] = [];
+  // Build LoadJourney objects
+  const journeys: LoadJourney[] = [];
 
-  containerMap.forEach((containerOrders, containerId) => {
+  loadMap.forEach((loadLegs, containerId) => {
     // Sort by sequence_number or created_at
-    containerOrders.sort((a, b) => {
+    loadLegs.sort((a, b) => {
       if (a.sequence_number && b.sequence_number) {
         return a.sequence_number - b.sequence_number;
       }
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
 
-    const firstOrder = containerOrders[0];
-    const shipmentType = firstOrder.shipment_type || 'IMPORT';
+    const firstLeg = loadLegs[0];
+    const shipmentType = firstLeg.shipment_type || 'IMPORT';
     const expectedJourney = shipmentType === 'EXPORT' ? EXPORT_JOURNEY : IMPORT_JOURNEY;
 
     // Calculate current step and next action
-    const completedOrders = containerOrders.filter(o => o.status === 'COMPLETED');
-    const inProgressOrders = containerOrders.filter(o => ['DISPATCHED', 'IN_PROGRESS'].includes(o.status));
-    const pendingOrders = containerOrders.filter(o => ['PENDING', 'READY'].includes(o.status));
+    const completedLegs = loadLegs.filter(l => l.status === 'COMPLETED');
+    const inProgressLegs = loadLegs.filter(l => ['DISPATCHED', 'IN_PROGRESS'].includes(l.status));
+    const pendingLegs = loadLegs.filter(l => ['PENDING', 'READY'].includes(l.status));
 
     // Find where we are in the journey
-    let currentStep = completedOrders.length;
-    if (inProgressOrders.length > 0) currentStep += 0.5; // Halfway through a step
+    let currentStep = completedLegs.length;
+    if (inProgressLegs.length > 0) currentStep += 0.5; // Halfway through a step
 
     // Determine what's next
     let nextAction: string | undefined;
-    if (inProgressOrders.length > 0) {
-      const inProg = inProgressOrders[0];
+    let nextLegType: string | undefined;
+
+    if (inProgressLegs.length > 0) {
+      const inProg = inProgressLegs[0];
       nextAction = `Complete ${MOVE_TYPE_LABELS[inProg.move_type]?.label || inProg.move_type}`;
-    } else if (pendingOrders.length > 0) {
-      const pending = pendingOrders[0];
+      nextLegType = inProg.move_type;
+    } else if (pendingLegs.length > 0) {
+      const pending = pendingLegs[0];
       nextAction = `Dispatch ${MOVE_TYPE_LABELS[pending.move_type]?.label || pending.move_type}`;
-    } else if (completedOrders.length === containerOrders.length) {
-      // Check if we need more orders based on expected journey
-      const completedMoveTypes = completedOrders.map(o => o.move_type);
+      nextLegType = pending.move_type;
+    } else {
+      // Check if we need more legs based on expected journey
+      const completedMoveTypes = completedLegs.map(l => l.move_type);
       const missingSteps = expectedJourney.filter(step => !completedMoveTypes.includes(step));
       if (missingSteps.length > 0) {
-        nextAction = `Create ${MOVE_TYPE_LABELS[missingSteps[0]]?.label || missingSteps[0]}`;
+        nextAction = `Create ${MOVE_TYPE_LABELS[missingSteps[0]]?.label || missingSteps[0]} leg`;
+        nextLegType = missingSteps[0];
       }
     }
 
     // Determine if journey is complete
-    const completedMoveTypes = completedOrders.map(o => o.move_type);
+    const completedMoveTypes = completedLegs.map(l => l.move_type);
     const isComplete = expectedJourney.every(step => completedMoveTypes.includes(step));
 
     journeys.push({
       container_id: containerId,
-      container_number: firstOrder.container_number,
-      container_size: firstOrder.container_size,
+      container_number: firstLeg.container_number,
+      container_size: firstLeg.container_size,
+      shipment_id: firstLeg.shipment_id,
       shipment_type: shipmentType,
-      customer_name: firstOrder.customer_name,
-      terminal_name: firstOrder.terminal_name,
-      last_free_day: firstOrder.last_free_day,
-      is_hazmat: firstOrder.is_hazmat,
-      is_overweight: firstOrder.is_overweight,
-      orders: containerOrders,
+      customer_name: firstLeg.customer_name,
+      terminal_name: firstLeg.terminal_name,
+      delivery_address: firstLeg.delivery_address,
+      delivery_city: firstLeg.delivery_city,
+      last_free_day: firstLeg.last_free_day,
+      steamship_line: firstLeg.steamship_line,
+      is_hazmat: firstLeg.is_hazmat,
+      is_overweight: firstLeg.is_overweight,
+      legs: loadLegs,
       currentStep,
       totalSteps: expectedJourney.length,
       nextAction,
+      nextLegType,
       isComplete,
     });
   });
@@ -367,29 +427,27 @@ function OrderCard({
 }
 
 // ============================================================================
-// CONTAINER JOURNEY CARD COMPONENT
+// LOAD CARD COMPONENT (Shows container/load with all its legs)
 // ============================================================================
 
-function ContainerJourneyCard({
-  journey,
-  onOrderClick,
-  onAssignDriver,
-  onCreateTrip,
+function LoadCard({
+  load,
+  onLegClick,
+  onDispatch,
   onStatusChange,
 }: {
-  journey: ContainerJourney;
-  onOrderClick: (order: DispatchOrder) => void;
-  onAssignDriver: (order: DispatchOrder) => void;
-  onCreateTrip: (order: DispatchOrder) => void;
-  onStatusChange: (orderId: string, status: string) => void;
+  load: LoadJourney;
+  onLegClick: (leg: DispatchOrder) => void;
+  onDispatch: (load: LoadJourney, existingLeg?: DispatchOrder) => void;
+  onStatusChange: (legId: string, status: string) => void;
 }) {
-  const shipmentType = journey.shipment_type || 'IMPORT';
+  const shipmentType = load.shipment_type || 'IMPORT';
   const expectedJourney = shipmentType === 'EXPORT' ? EXPORT_JOURNEY : IMPORT_JOURNEY;
 
   // Calculate LFD urgency
   const getLFDUrgency = () => {
-    if (!journey.last_free_day) return null;
-    const lfd = new Date(journey.last_free_day);
+    if (!load.last_free_day) return null;
+    const lfd = new Date(load.last_free_day);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diff = Math.ceil((lfd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -403,18 +461,18 @@ function ContainerJourneyCard({
 
   const lfdUrgency = getLFDUrgency();
 
-  // Get order for a specific move type
-  const getOrderForMoveType = (moveType: string): DispatchOrder | undefined => {
-    return journey.orders.find(o => o.move_type === moveType);
+  // Get leg for a specific move type
+  const getLegForMoveType = (moveType: string): DispatchOrder | undefined => {
+    return load.legs.find(l => l.move_type === moveType);
   };
 
-  // Render status indicator for each step
-  const renderStepStatus = (moveType: string, stepIndex: number) => {
-    const order = getOrderForMoveType(moveType);
+  // Render status indicator for each step (leg)
+  const renderLegStatus = (moveType: string, stepIndex: number) => {
+    const leg = getLegForMoveType(moveType);
     const moveInfo = MOVE_TYPE_LABELS[moveType] || { label: moveType, icon: '📋', color: 'bg-gray-100' };
 
-    if (!order) {
-      // Order doesn't exist yet - needs to be created
+    if (!leg) {
+      // Leg doesn't exist yet - needs to be created & dispatched
       return (
         <div className="flex items-center gap-2 p-2 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
           <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-400">
@@ -427,11 +485,11 @@ function ContainerJourneyCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              // Could trigger create order flow here
+              onDispatch(load, undefined); // Create new leg
             }}
-            className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+            className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium"
           >
-            + Create
+            + Create & Dispatch
           </button>
         </div>
       );
@@ -442,15 +500,15 @@ function ContainerJourneyCard({
     let statusText = 'Pending';
     let statusIcon = '○';
 
-    if (order.status === 'COMPLETED') {
+    if (leg.status === 'COMPLETED') {
       statusColor = 'bg-green-500';
       statusText = 'Done';
       statusIcon = '✓';
-    } else if (order.status === 'IN_PROGRESS') {
+    } else if (leg.status === 'IN_PROGRESS') {
       statusColor = 'bg-yellow-500';
       statusText = 'In Progress';
       statusIcon = '►';
-    } else if (order.status === 'DISPATCHED') {
+    } else if (leg.status === 'DISPATCHED') {
       statusColor = 'bg-blue-500';
       statusText = 'Dispatched';
       statusIcon = '→';
@@ -459,12 +517,12 @@ function ContainerJourneyCard({
     return (
       <div
         className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:shadow-sm transition ${
-          order.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
-          order.status === 'IN_PROGRESS' ? 'bg-yellow-50 border-yellow-200' :
-          order.status === 'DISPATCHED' ? 'bg-blue-50 border-blue-200' :
+          leg.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
+          leg.status === 'IN_PROGRESS' ? 'bg-yellow-50 border-yellow-200' :
+          leg.status === 'DISPATCHED' ? 'bg-blue-50 border-blue-200' :
           'bg-white border-gray-200'
         }`}
-        onClick={() => onOrderClick(order)}
+        onClick={() => onLegClick(leg)}
       >
         <div className={`w-8 h-8 rounded-full ${statusColor} flex items-center justify-center text-white text-sm font-medium`}>
           {statusIcon}
@@ -472,51 +530,47 @@ function ContainerJourneyCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium">{moveInfo.label}</p>
-            <span className="text-xs text-gray-400">#{order.order_number}</span>
+            <span className="text-xs text-gray-400">#{leg.order_number}</span>
           </div>
           <p className="text-xs text-gray-500 truncate">
-            {order.status === 'COMPLETED' ? (
-              `Completed ${order.completed_at ? new Date(order.completed_at).toLocaleDateString() : ''}`
-            ) : order.assigned_driver_name ? (
-              `Driver: ${order.assigned_driver_name}`
+            {leg.status === 'COMPLETED' ? (
+              `Completed ${leg.completed_at ? new Date(leg.completed_at).toLocaleDateString() : ''}`
+            ) : leg.assigned_driver_name ? (
+              `Driver: ${leg.assigned_driver_name}`
             ) : (
-              `${order.pickup_city || 'Pickup'} → ${order.delivery_city || 'Delivery'}`
+              `${leg.pickup_city || 'Pickup'} → ${leg.delivery_city || 'Delivery'}`
             )}
           </p>
         </div>
 
         {/* Quick Actions */}
-        {order.status === 'PENDING' && !order.assigned_driver_id && (
+        {leg.status === 'PENDING' && !leg.assigned_driver_id && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (['IMPORT_DELIVERY', 'YARD_DELIVERY'].includes(order.move_type)) {
-                onCreateTrip(order);
-              } else {
-                onAssignDriver(order);
-              }
+              onDispatch(load, leg); // Dispatch existing leg
             }}
-            className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium"
           >
             Dispatch
           </button>
         )}
-        {order.status === 'DISPATCHED' && (
+        {leg.status === 'DISPATCHED' && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onStatusChange(order.id, 'IN_PROGRESS');
+              onStatusChange(leg.id, 'IN_PROGRESS');
             }}
             className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
           >
             Start
           </button>
         )}
-        {order.status === 'IN_PROGRESS' && (
+        {leg.status === 'IN_PROGRESS' && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onStatusChange(order.id, 'COMPLETED');
+              onStatusChange(leg.id, 'COMPLETED');
             }}
             className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
           >
@@ -529,28 +583,28 @@ function ContainerJourneyCard({
 
   return (
     <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${
-      journey.isComplete ? 'border-green-300' : lfdUrgency?.urgent ? 'border-orange-300' : 'border-gray-200'
+      load.isComplete ? 'border-green-300' : lfdUrgency?.urgent ? 'border-orange-300' : 'border-gray-200'
     }`}>
       {/* Header */}
       <div className={`px-4 py-3 ${
-        journey.isComplete ? 'bg-green-50' :
+        load.isComplete ? 'bg-green-50' :
         lfdUrgency?.urgent ? 'bg-orange-50' :
         'bg-gray-50'
       }`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="font-mono font-bold text-lg">{journey.container_number}</span>
-              {journey.is_hazmat && <span title="Hazmat" className="text-lg">☣️</span>}
-              {journey.is_overweight && <span title="Overweight" className="text-lg">⚖️</span>}
+              <span className="font-mono font-bold text-lg">{load.container_number}</span>
+              {load.is_hazmat && <span title="Hazmat" className="text-lg">☣️</span>}
+              {load.is_overweight && <span title="Overweight" className="text-lg">⚖️</span>}
             </div>
             <span className={`text-xs px-2 py-1 rounded-full ${
               shipmentType === 'IMPORT' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'
             }`}>
               {shipmentType}
             </span>
-            {journey.container_size && (
-              <span className="text-xs text-gray-500">{journey.container_size}'</span>
+            {load.container_size && (
+              <span className="text-xs text-gray-500">{load.container_size}'</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -559,7 +613,7 @@ function ContainerJourneyCard({
                 LFD: {lfdUrgency.text}
               </span>
             )}
-            {journey.isComplete && (
+            {load.isComplete && (
               <span className="px-2 py-1 bg-green-600 text-white rounded text-xs font-medium">
                 ✓ Complete
               </span>
@@ -567,34 +621,34 @@ function ContainerJourneyCard({
           </div>
         </div>
         <div className="mt-1 flex items-center gap-4 text-sm text-gray-600">
-          <span>{journey.customer_name || 'No Customer'}</span>
+          <span>{load.customer_name || 'No Customer'}</span>
           <span className="text-gray-300">|</span>
-          <span>{journey.terminal_name || 'No Terminal'}</span>
+          <span>{load.terminal_name || 'No Terminal'}</span>
         </div>
       </div>
 
       {/* Progress Bar */}
       <div className="px-4 py-2 bg-gray-100">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Journey Progress</span>
+          <span className="text-xs text-gray-500">Load Progress</span>
           <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${journey.isComplete ? 'bg-green-500' : 'bg-indigo-500'}`}
-              style={{ width: `${(journey.currentStep / journey.totalSteps) * 100}%` }}
+              className={`h-full transition-all ${load.isComplete ? 'bg-green-500' : 'bg-indigo-500'}`}
+              style={{ width: `${(load.currentStep / load.totalSteps) * 100}%` }}
             />
           </div>
           <span className="text-xs font-medium text-gray-600">
-            {Math.floor(journey.currentStep)}/{journey.totalSteps}
+            {Math.floor(load.currentStep)}/{load.totalSteps} legs
           </span>
         </div>
       </div>
 
-      {/* Journey Steps */}
+      {/* Legs (journey steps) */}
       <div className="p-4">
         <div className="space-y-2">
           {expectedJourney.map((moveType, index) => (
             <div key={moveType}>
-              {renderStepStatus(moveType, index)}
+              {renderLegStatus(moveType, index)}
               {index < expectedJourney.length - 1 && (
                 <div className="flex items-center ml-4 my-1">
                   <div className="w-px h-4 bg-gray-300"></div>
@@ -605,11 +659,21 @@ function ContainerJourneyCard({
         </div>
 
         {/* Next Action Callout */}
-        {journey.nextAction && !journey.isComplete && (
+        {load.nextAction && !load.isComplete && (
           <div className="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-600">👉</span>
-              <span className="text-sm font-medium text-indigo-700">Next: {journey.nextAction}</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-indigo-600">👉</span>
+                <span className="text-sm font-medium text-indigo-700">Next: {load.nextAction}</span>
+              </div>
+              {load.nextLegType && !load.legs.find(l => l.move_type === load.nextLegType && l.status === 'PENDING') && (
+                <button
+                  onClick={() => onDispatch(load, undefined)}
+                  className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium"
+                >
+                  Create Leg
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -837,7 +901,8 @@ export default function DispatchBoardV2() {
   const [creatingTripFor, setCreatingTripFor] = useState<DispatchOrder | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'IMPORT' | 'EXPORT' | 'URGENT' | 'EMPTY_RETURN'>('ALL');
   const [showEmptyPanel, setShowEmptyPanel] = useState(true);
-  const [viewMode, setViewMode] = useState<'orders' | 'containers'>('containers'); // Default to container view
+  const [viewMode, setViewMode] = useState<'orders' | 'loads'>('loads'); // Default to load view
+  const [dispatchTarget, setDispatchTarget] = useState<DispatchTarget | null>(null); // For dispatch modal
 
   // Load data
   const loadData = useCallback(async () => {
@@ -849,10 +914,11 @@ export default function DispatchBoardV2() {
         .select(`
           *,
           container:containers!container_id(
-            container_number, size, type, is_hazmat, is_overweight, customs_status
+            container_number, size, type, is_hazmat, is_overweight, customs_status, weight_lbs
           ),
           shipment:shipments!shipment_id(
-            reference_number, type, terminal_name, steamship_line, last_free_day, customer_name
+            reference_number, type, terminal_name, steamship_line, last_free_day, customer_name,
+            booking_number, bill_of_lading, delivery_address, delivery_city, delivery_state
           ),
           driver:drivers!assigned_driver_id(
             id, first_name, last_name
@@ -864,7 +930,7 @@ export default function DispatchBoardV2() {
 
       if (ordersError) throw ordersError;
 
-      // Transform orders
+      // Transform orders (legs)
       const transformedOrders: DispatchOrder[] = (ordersData || []).map((o: any) => ({
         id: o.id,
         order_number: o.order_number,
@@ -875,8 +941,10 @@ export default function DispatchBoardV2() {
         container_id: o.container_id,
         container_number: o.container?.container_number || 'N/A',
         container_size: o.container?.size,
+        container_type: o.container?.type,
         is_hazmat: o.container?.is_hazmat,
         is_overweight: o.container?.is_overweight,
+        weight_lbs: o.container?.weight_lbs,
         customs_status: o.container?.customs_status,
         shipment_id: o.shipment_id,
         shipment_reference: o.shipment?.reference_number,
@@ -885,10 +953,12 @@ export default function DispatchBoardV2() {
         steamship_line: o.shipment?.steamship_line,
         last_free_day: o.shipment?.last_free_day,
         customer_name: o.shipment?.customer_name,
+        booking_number: o.shipment?.booking_number,
+        bill_of_lading: o.shipment?.bill_of_lading,
         pickup_address: o.pickup_address,
         pickup_city: o.pickup_city,
-        delivery_address: o.delivery_address,
-        delivery_city: o.delivery_city,
+        delivery_address: o.delivery_address || o.shipment?.delivery_address,
+        delivery_city: o.delivery_city || o.shipment?.delivery_city,
         pickup_appointment: o.pickup_appointment,
         delivery_appointment: o.delivery_appointment,
         assigned_driver_id: o.assigned_driver_id,
@@ -1045,14 +1115,14 @@ export default function DispatchBoardV2() {
           {/* View Mode Toggle */}
           <div className="flex bg-gray-100 rounded-lg p-1">
             <button
-              onClick={() => setViewMode('containers')}
+              onClick={() => setViewMode('loads')}
               className={`px-3 py-1.5 text-sm rounded-md transition font-medium ${
-                viewMode === 'containers'
+                viewMode === 'loads'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-gray-600 hover:text-gray-800'
               }`}
             >
-              📦 Container Journey
+              📦 Loads View
             </button>
             <button
               onClick={() => setViewMode('orders')}
@@ -1062,7 +1132,7 @@ export default function DispatchBoardV2() {
                   : 'text-gray-600 hover:text-gray-800'
               }`}
             >
-              📋 Order Board
+              📋 Legs Board
             </button>
           </div>
 
@@ -1085,9 +1155,9 @@ export default function DispatchBoardV2() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">
-            {viewMode === 'containers'
-              ? `${groupOrdersByContainer(filteredOrders).length} containers`
-              : `${filteredOrders.length} orders`
+            {viewMode === 'loads'
+              ? `${groupLegsByLoad(filteredOrders).length} loads`
+              : `${filteredOrders.length} legs`
             }
           </span>
           <button
@@ -1104,19 +1174,19 @@ export default function DispatchBoardV2() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Container Journey View */}
-        {viewMode === 'containers' ? (
+        {/* Loads View */}
+        {viewMode === 'loads' ? (
           <div className="flex-1 p-4 overflow-y-auto">
             {/* Summary Stats */}
             <div className="mb-4 grid grid-cols-4 gap-4">
               {(() => {
-                const journeys = groupOrdersByContainer(filteredOrders);
-                const complete = journeys.filter(j => j.isComplete).length;
-                const inProgress = journeys.filter(j => !j.isComplete && j.orders.some(o => ['DISPATCHED', 'IN_PROGRESS'].includes(o.status))).length;
-                const pending = journeys.filter(j => !j.isComplete && j.orders.every(o => ['PENDING', 'READY'].includes(o.status))).length;
-                const urgent = journeys.filter(j => {
-                  if (j.isComplete || !j.last_free_day) return false;
-                  const lfd = new Date(j.last_free_day);
+                const loads = groupLegsByLoad(filteredOrders);
+                const complete = loads.filter(l => l.isComplete).length;
+                const inProgress = loads.filter(l => !l.isComplete && l.legs.some(leg => ['DISPATCHED', 'IN_PROGRESS'].includes(leg.status))).length;
+                const pending = loads.filter(l => !l.isComplete && l.legs.every(leg => ['PENDING', 'READY'].includes(leg.status))).length;
+                const urgent = loads.filter(l => {
+                  if (l.isComplete || !l.last_free_day) return false;
+                  const lfd = new Date(l.last_free_day);
                   const today = new Date();
                   const diff = Math.ceil((lfd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
                   return diff <= 2;
@@ -1124,8 +1194,8 @@ export default function DispatchBoardV2() {
                 return (
                   <>
                     <div className="bg-white rounded-lg p-3 border shadow-sm">
-                      <p className="text-xs text-gray-500 uppercase">Total Containers</p>
-                      <p className="text-2xl font-bold text-gray-900">{journeys.length}</p>
+                      <p className="text-xs text-gray-500 uppercase">Total Loads</p>
+                      <p className="text-2xl font-bold text-gray-900">{loads.length}</p>
                     </div>
                     <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200 shadow-sm">
                       <p className="text-xs text-yellow-600 uppercase">In Progress</p>
@@ -1144,21 +1214,53 @@ export default function DispatchBoardV2() {
               })()}
             </div>
 
-            {/* Container Journey Cards */}
+            {/* Load Cards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {groupOrdersByContainer(filteredOrders).map(journey => (
-                <ContainerJourneyCard
-                  key={journey.container_id}
-                  journey={journey}
-                  onOrderClick={(order) => setSelectedOrder(order)}
-                  onAssignDriver={(order) => setAssigningOrder(order)}
-                  onCreateTrip={(order) => setCreatingTripFor(order)}
+              {groupLegsByLoad(filteredOrders).map(load => (
+                <LoadCard
+                  key={load.container_id}
+                  load={load}
+                  onLegClick={(leg) => setSelectedOrder(leg)}
+                  onDispatch={(loadData, existingLeg) => {
+                    // Build dispatch target for the modal
+                    setDispatchTarget({
+                      container: {
+                        id: loadData.container_id,
+                        container_number: loadData.container_number,
+                        size: loadData.container_size,
+                        is_hazmat: loadData.is_hazmat,
+                        is_overweight: loadData.is_overweight,
+                        weight_lbs: loadData.weight_lbs,
+                      },
+                      shipment: {
+                        id: loadData.shipment_id,
+                        type: (loadData.shipment_type || 'IMPORT') as 'IMPORT' | 'EXPORT',
+                        customer_name: loadData.customer_name,
+                        terminal_name: loadData.terminal_name,
+                        delivery_address: loadData.delivery_address,
+                        delivery_city: loadData.delivery_city,
+                        last_free_day: loadData.last_free_day,
+                        steamship_line: loadData.steamship_line,
+                        booking_number: loadData.booking_number,
+                        bill_of_lading: loadData.bill_of_lading,
+                      },
+                      existingLeg: existingLeg ? {
+                        id: existingLeg.id,
+                        order_number: existingLeg.order_number,
+                        move_type: existingLeg.move_type,
+                        pickup_address: existingLeg.pickup_address,
+                        pickup_city: existingLeg.pickup_city,
+                        delivery_address: existingLeg.delivery_address,
+                        delivery_city: existingLeg.delivery_city,
+                      } : undefined,
+                    });
+                  }}
                   onStatusChange={handleStatusChange}
                 />
               ))}
-              {groupOrdersByContainer(filteredOrders).length === 0 && (
+              {groupLegsByLoad(filteredOrders).length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400">
-                  No containers found
+                  No loads found
                 </div>
               )}
             </div>
@@ -1259,6 +1361,20 @@ export default function DispatchBoardV2() {
           onClose={() => setSelectedOrder(null)}
           onSave={() => {
             setSelectedOrder(null);
+            loadData();
+          }}
+        />
+      )}
+
+      {/* Dispatch Modal */}
+      {dispatchTarget && (
+        <DispatchModal
+          container={dispatchTarget.container}
+          shipment={dispatchTarget.shipment}
+          existingLeg={dispatchTarget.existingLeg}
+          onClose={() => setDispatchTarget(null)}
+          onSuccess={() => {
+            setDispatchTarget(null);
             loadData();
           }}
         />
