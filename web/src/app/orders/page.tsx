@@ -47,6 +47,7 @@ export default function OrdersPage() {
         vessel: formData.vessel,
         voyage: formData.voyage,
         terminal_name: formData.terminal,
+        empty_return_terminal: formData.emptyReturnTerminal || formData.terminal, // Default to same terminal if not specified
         last_free_day: formData.lastFreeDay || null,
         port_cutoff: formData.portCutoff || null,
         trip_type: formData.tripType,
