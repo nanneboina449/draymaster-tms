@@ -67,26 +67,19 @@ CREATE TRIGGER trg_chassis_per_diem
     FOR EACH ROW
     EXECUTE FUNCTION calculate_chassis_per_diem();
 
--- Add chassis_pools table if not exists (for pool rate management)
-CREATE TABLE IF NOT EXISTS chassis_pools (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    pool_name       VARCHAR(100) NOT NULL,
-    pool_code       VARCHAR(20) NOT NULL UNIQUE,
-    free_days       INTEGER DEFAULT 4,
-    daily_rate      DECIMAL(10,2) DEFAULT 30.00,
-    is_active       BOOLEAN DEFAULT TRUE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Add missing columns to existing chassis_pools table
+ALTER TABLE chassis_pools ADD COLUMN IF NOT EXISTS free_days INTEGER DEFAULT 4;
+ALTER TABLE chassis_pools ADD COLUMN IF NOT EXISTS daily_rate DECIMAL(10,2) DEFAULT 30.00;
+ALTER TABLE chassis_pools ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
 
--- Insert default chassis pools if they don't exist
-INSERT INTO chassis_pools (pool_name, pool_code, free_days, daily_rate) VALUES
+-- Insert default chassis pools if they don't exist (using existing column names: name, code)
+INSERT INTO chassis_pools (name, code, free_days, daily_rate) VALUES
 ('DCLI Pool', 'DCLI', 4, 30.00),
 ('TRAC Intermodal', 'TRAC', 4, 32.00),
 ('FlexiVan', 'FLEXI', 5, 28.00),
 ('Direct Chassis', 'DIRECT', 3, 35.00),
 ('Company Owned', 'OWN', 999, 0.00)
-ON CONFLICT (pool_code) DO NOTHING;
+ON CONFLICT (code) DO NOTHING;
 
 -- Success message
 DO $$

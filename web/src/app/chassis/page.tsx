@@ -33,8 +33,8 @@ interface ChassisUsage {
 
 interface ChassisPool {
   id: string;
-  pool_name: string;
-  pool_code: string;
+  name: string;
+  code: string;
   free_days: number;
   daily_rate: number;
 }
@@ -93,8 +93,7 @@ export default function ChassisManagementPage() {
       const { data: poolsData, error: poolsError } = await supabase
         .from('chassis_pools')
         .select('*')
-        .eq('is_active', true)
-        .order('pool_name');
+        .order('name');
       if (poolsError) throw poolsError;
       setChassisPools(poolsData || []);
     } catch (err: any) {
@@ -106,7 +105,7 @@ export default function ChassisManagementPage() {
   };
 
   const handlePoolChange = (poolCode: string) => {
-    const pool = chassisPools.find(p => p.pool_code === poolCode);
+    const pool = chassisPools.find(p => p.code === poolCode);
     setFormData({
       ...formData,
       chassis_pool: poolCode,
@@ -519,17 +518,17 @@ export default function ChassisManagementPage() {
               {chassisPools.map((pool) => (
                 <div key={pool.id} className="border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-semibold text-lg">{pool.pool_name}</h3>
-                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">{pool.pool_code}</span>
+                    <h3 className="font-semibold text-lg">{pool.name}</h3>
+                    <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">{pool.code}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500">Free Days:</span>
-                      <span className="ml-2 font-semibold">{pool.free_days}</span>
+                      <span className="ml-2 font-semibold">{pool.free_days || 4}</span>
                     </div>
                     <div>
                       <span className="text-gray-500">Daily Rate:</span>
-                      <span className="ml-2 font-semibold">${pool.daily_rate}</span>
+                      <span className="ml-2 font-semibold">${pool.daily_rate || 30}</span>
                     </div>
                   </div>
                 </div>
@@ -706,7 +705,7 @@ export default function ChassisManagementPage() {
                       className="w-full px-4 py-2 border rounded-lg"
                     >
                       {chassisPools.map(p => (
-                        <option key={p.pool_code} value={p.pool_code}>{p.pool_name}</option>
+                        <option key={p.code} value={p.code}>{p.name}</option>
                       ))}
                     </select>
                   </div>
