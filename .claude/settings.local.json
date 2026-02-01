@@ -21,7 +21,8 @@
       "Bash(npm install:*)",
       "Bash(git reset:*)",
       "Bash(git restore:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npx supabase:*)"
     ]
   }
 }
