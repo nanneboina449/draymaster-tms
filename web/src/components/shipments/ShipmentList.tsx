@@ -59,8 +59,8 @@ export function ShipmentList({ shipments, onView, onEdit, onDelete, onStatusChan
     return (
       <div className="bg-white rounded-xl shadow p-12 text-center">
         <div className="text-6xl mb-4">📦</div>
-        <h3 className="text-xl font-semibold text-gray-900">No shipments found</h3>
-        <p className="text-gray-500 mt-2">Create a new shipment to get started</p>
+        <h3 className="text-xl font-semibold text-gray-900">No orders found</h3>
+        <p className="text-gray-500 mt-2">Click "New Order" to create your first order</p>
       </div>
     );
   }
@@ -68,7 +68,7 @@ export function ShipmentList({ shipments, onView, onEdit, onDelete, onStatusChan
   return (
     <div className="bg-white rounded-xl shadow overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900">All Shipments ({shipments.length})</h2>
+        <h2 className="text-lg font-semibold text-gray-900">All Orders ({shipments.length})</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
@@ -133,7 +133,7 @@ export function ShipmentList({ shipments, onView, onEdit, onDelete, onStatusChan
                         </span>
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">No orders</span>
+                      <span className="text-xs text-gray-400">No loads</span>
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

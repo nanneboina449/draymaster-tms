@@ -42,6 +42,36 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Prevent duplicate container assignments in orders
+-- First, resolve any existing duplicates by keeping only the most recent order per container
+DO $$
+DECLARE
+    dup_record RECORD;
+BEGIN
+    -- Find containers with multiple active orders
+    FOR dup_record IN
+        SELECT container_id, array_agg(id ORDER BY created_at DESC) as order_ids
+        FROM orders
+        WHERE container_id IS NOT NULL
+          AND deleted_at IS NULL
+          AND status NOT IN ('CANCELLED', 'COMPLETED')
+        GROUP BY container_id
+        HAVING COUNT(*) > 1
+    LOOP
+        -- Cancel all but the most recent order (first in array after DESC sort)
+        UPDATE orders
+        SET status = 'CANCELLED',
+            updated_at = NOW()
+        WHERE id = ANY(dup_record.order_ids[2:])
+          AND status NOT IN ('CANCELLED', 'COMPLETED');
+
+        RAISE NOTICE 'Resolved duplicate orders for container_id %: kept %, cancelled %',
+            dup_record.container_id,
+            dup_record.order_ids[1],
+            dup_record.order_ids[2:];
+    END LOOP;
+END $$;
+
+-- Now create the unique index
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_container_active
     ON orders(container_id)
     WHERE deleted_at IS NULL AND status NOT IN ('CANCELLED', 'COMPLETED');
@@ -535,24 +565,21 @@ CREATE INDEX IF NOT EXISTS idx_trips_deleted ON trips(deleted_at) WHERE deleted_
 -- 7. NOTIFICATION SYSTEM
 -- ==============================================================================
 
-CREATE TABLE IF NOT EXISTS notification_templates (
+-- Drop and recreate notification_templates table with correct schema
+-- (Safe because this is a configuration table, not transactional data)
+DROP TABLE IF EXISTS notification_templates CASCADE;
+
+CREATE TABLE notification_templates (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code                VARCHAR(50) NOT NULL UNIQUE,
     name                VARCHAR(100) NOT NULL,
-
-    -- Template content
     subject_template    TEXT,
     body_template       TEXT NOT NULL,
     sms_template        TEXT,
-
-    -- Channels
     send_email          BOOLEAN DEFAULT TRUE,
     send_sms            BOOLEAN DEFAULT FALSE,
     send_push           BOOLEAN DEFAULT FALSE,
-
-    -- Settings
     is_active           BOOLEAN DEFAULT TRUE,
-
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -576,51 +603,62 @@ INSERT INTO notification_templates (code, name, subject_template, body_template,
     'Delivered: {{container_number}} to {{delivery_location}}', TRUE, TRUE),
 ('EXCEPTION_ALERT', 'Exception Alert', 'ALERT: {{exception_type}} - {{container_number}}',
     'An exception has been detected:\n\nType: {{exception_type}}\nContainer: {{container_number}}\nDetails: {{exception_details}}\n\nPlease investigate.',
-    'ALERT: {{exception_type}} on {{container_number}}', TRUE, TRUE)
-ON CONFLICT (code) DO NOTHING;
+    'ALERT: {{exception_type}} on {{container_number}}', TRUE, TRUE);
 
--- Notification queue
+-- Notification queue - create base table
 CREATE TABLE IF NOT EXISTS notifications (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    template_code       VARCHAR(50) NOT NULL,
-
-    -- Recipients
-    recipient_email     VARCHAR(255),
-    recipient_phone     VARCHAR(50),
-    recipient_user_id   UUID,
-
-    -- Content (rendered)
-    subject             VARCHAR(500),
-    body                TEXT,
-    sms_body            VARCHAR(500),
-
-    -- Variables used
-    variables           JSONB,
-
-    -- Channels sent
-    email_sent          BOOLEAN DEFAULT FALSE,
-    email_sent_at       TIMESTAMPTZ,
-    sms_sent            BOOLEAN DEFAULT FALSE,
-    sms_sent_at         TIMESTAMPTZ,
-    push_sent           BOOLEAN DEFAULT FALSE,
-    push_sent_at        TIMESTAMPTZ,
-
-    -- Status
-    status              VARCHAR(20) DEFAULT 'PENDING',
-    -- PENDING, SENT, PARTIAL, FAILED
-    error_message       TEXT,
-
-    -- Retry tracking
-    retry_count         INTEGER DEFAULT 0,
-    next_retry_at       TIMESTAMPTZ,
-
-    -- References
-    order_id            UUID REFERENCES orders(id),
-    trip_id             UUID REFERENCES trips(id),
-
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Add all columns to notifications table (handles both new and existing tables)
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS template_code VARCHAR(50);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_email VARCHAR(255);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_phone VARCHAR(50);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_user_id UUID;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subject VARCHAR(500);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS body TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sms_body VARCHAR(500);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS variables JSONB;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_sent BOOLEAN DEFAULT FALSE;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_sent_at TIMESTAMPTZ;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sms_sent BOOLEAN DEFAULT FALSE;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sms_sent_at TIMESTAMPTZ;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_sent BOOLEAN DEFAULT FALSE;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS push_sent_at TIMESTAMPTZ;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'PENDING';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS order_id UUID;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS trip_id UUID;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+
+-- Add foreign key constraints if they don't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'notifications_order_id_fkey'
+    ) THEN
+        ALTER TABLE notifications ADD CONSTRAINT notifications_order_id_fkey
+            FOREIGN KEY (order_id) REFERENCES orders(id);
+    END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'notifications_trip_id_fkey'
+    ) THEN
+        ALTER TABLE notifications ADD CONSTRAINT notifications_trip_id_fkey
+            FOREIGN KEY (trip_id) REFERENCES trips(id);
+    END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
 CREATE INDEX IF NOT EXISTS idx_notifications_pending ON notifications(status, next_retry_at)
@@ -710,7 +748,7 @@ CREATE INDEX IF NOT EXISTS idx_containers_demurrage ON containers(demurrage_stat
 
 -- Trips
 CREATE INDEX IF NOT EXISTS idx_trips_driver_status ON trips(driver_id, status);
-CREATE INDEX IF NOT EXISTS idx_trips_scheduled ON trips(scheduled_date) WHERE status IN ('PLANNED', 'ASSIGNED', 'DISPATCHED');
+CREATE INDEX IF NOT EXISTS idx_trips_planned_start ON trips(planned_start_time) WHERE status IN ('PLANNED', 'ASSIGNED', 'DISPATCHED');
 CREATE INDEX IF NOT EXISTS idx_trips_status_date ON trips(status, created_at DESC);
 
 -- Drivers
