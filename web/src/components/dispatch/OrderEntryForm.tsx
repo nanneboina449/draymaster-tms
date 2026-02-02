@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import {
-  Order, Customer, OrderType, ShippingLine, Terminal,
+  Customer, OrderType, ShippingLine, Terminal,
   SHIPPING_LINE_LABELS, TERMINAL_LABELS
 } from '@/lib/types';
-import { supabase, createLoad } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { validateContainerNumber } from '@/lib/validations';
 
 interface OrderEntryFormProps {
@@ -119,62 +119,106 @@ export default function OrderEntryForm({ onClose, onSuccess }: OrderEntryFormPro
     setLoading(true);
 
     try {
-      // Create order
-      const orderNumber = `ORD-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
-      
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
+      // Get customer name for denormalized storage
+      const customer = customers.find(c => c.id === selectedCustomerId);
+      const customerName = customer?.company_name || '';
+
+      // Generate reference number (BOL for import, booking for export)
+      const referenceNumber = orderType === 'IMPORT'
+        ? orderData.bill_of_lading
+        : orderData.booking_number;
+
+      // 1. Create SHIPMENT (the booking/delivery order)
+      const { data: shipment, error: shipmentError } = await supabase
+        .from('shipments')
         .insert({
-          order_number: orderNumber,
-          order_type: orderType,
+          type: orderType,
+          reference_number: referenceNumber,
           customer_id: selectedCustomerId,
-          source_type: 'MANUAL',
-          bill_of_lading: orderData.bill_of_lading || null,
+          customer_name: customerName,
+          steamship_line: orderData.shipping_line || null,
           booking_number: orderData.booking_number || null,
-          shipping_line: orderData.shipping_line || null,
-          vessel_name: orderData.vessel_name || null,
-          voyage_number: orderData.voyage_number || null,
-          port: orderData.port,
-          terminal: orderData.terminal || null,
-          eta_date: orderData.eta_date || null,
-          cutoff_date: orderData.cutoff_date || null,
-          location_name: orderData.location_name,
-          location_address: orderData.location_address,
-          location_city: orderData.location_city,
-          location_state: orderData.location_state,
-          location_zip: orderData.location_zip,
-          location_contact_name: orderData.location_contact_name || null,
-          location_contact_phone: orderData.location_contact_phone || null,
-          location_contact_email: orderData.location_contact_email || null,
-          appointment_required: orderData.appointment_required,
-          dock_hours: orderData.dock_hours || null,
+          bill_of_lading: orderData.bill_of_lading || null,
+          vessel: orderData.vessel_name || null,
+          voyage: orderData.voyage_number || null,
+          terminal_name: orderData.terminal || null,
+          vessel_eta: orderData.eta_date ? new Date(orderData.eta_date).toISOString() : null,
+          port_cutoff: orderData.cutoff_date ? new Date(orderData.cutoff_date).toISOString() : null,
+          delivery_address: orderData.location_address,
+          delivery_city: orderData.location_city,
+          delivery_state: orderData.location_state,
+          delivery_zip: orderData.location_zip,
           special_instructions: orderData.special_instructions || null,
-          status: 'RECEIVED',
+          status: 'PENDING',
         })
         .select()
         .single();
 
-      if (orderError) throw orderError;
+      if (shipmentError) throw shipmentError;
 
-      // Create loads for each container
+      // 2. Create CONTAINERS and ORDERS for each container
       for (const container of containers) {
-        if (container.container_number || orderType === 'EXPORT') {
-          await createLoad({
-            order_id: order.id,
-            customer_id: selectedCustomerId,
-            container_number: container.container_number || null,
-            container_size: container.container_size as any,
-            container_type: container.container_type as any,
+        // Skip empty container entries for imports that require container numbers
+        if (orderType === 'IMPORT' && !container.container_number) continue;
+
+        // For exports, use placeholder if no container number yet
+        const containerNumber = container.container_number || `TBD-${Date.now().toString(36).toUpperCase()}`;
+
+        // Create CONTAINER record
+        const { data: containerRecord, error: containerError } = await supabase
+          .from('containers')
+          .insert({
+            shipment_id: shipment.id,
+            container_number: containerNumber,
+            size: container.container_size,
+            type: container.container_type,
             weight_lbs: container.weight_lbs || null,
             is_hazmat: container.is_hazmat,
             is_overweight: container.is_overweight,
-            requires_triaxle: container.is_overweight,
-            terminal: orderData.terminal || null,
-            terminal_status: 'TRACKING',
-            status: 'TRACKING',
-            move_type: 'LIVE',
+            customs_status: 'PENDING',
+            lifecycle_status: 'BOOKED',
+            current_state: orderType === 'IMPORT' ? 'LOADED' : 'EMPTY',
+            current_location_type: 'VESSEL',
+          })
+          .select()
+          .single();
+
+        if (containerError) throw containerError;
+
+        // 3. Create initial ORDER (dispatch leg) for this container
+        // Import: IMPORT_DELIVERY (terminal → customer)
+        // Export: EMPTY_PICKUP (terminal → customer to pick up empty)
+        const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}`;
+        const initialMoveType = orderType === 'IMPORT' ? 'IMPORT_DELIVERY' : 'EMPTY_PICKUP';
+
+        // Determine pickup/delivery based on move type
+        const pickupCity = orderType === 'IMPORT' ? orderData.terminal : orderData.location_city;
+        const deliveryCity = orderType === 'IMPORT' ? orderData.location_city : orderData.location_city;
+        const deliveryAddress = orderData.location_address;
+
+        const { error: orderError } = await supabase
+          .from('orders')
+          .insert({
+            order_number: orderNumber,
+            container_id: containerRecord.id,
+            shipment_id: shipment.id,
+            type: orderType,
+            move_type_v2: initialMoveType,
+            trip_execution_type: 'LIVE_UNLOAD',
+            sequence_number: 1,
+            pickup_city: pickupCity,
+            delivery_address: deliveryAddress,
+            delivery_city: deliveryCity,
+            delivery_state: orderData.location_state,
+            delivery_zip: orderData.location_zip,
+            delivery_contact_name: orderData.location_contact_name || null,
+            delivery_contact_phone: orderData.location_contact_phone || null,
+            delivery_appointment_required: orderData.appointment_required,
+            special_instructions: orderData.special_instructions || null,
+            status: 'PENDING',
           });
-        }
+
+        if (orderError) throw orderError;
       }
 
       onSuccess();
