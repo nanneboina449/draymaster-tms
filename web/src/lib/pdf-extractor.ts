@@ -64,67 +64,73 @@ const US_STATES: Record<string, string> = {
 
 // Build extraction prompt for LLM
 export function buildExtractionPrompt(pdfText: string): string {
-  return `You are a logistics document parser. Extract shipment information from the following document text.
+  return `You are an expert logistics document parser specializing in drayage/intermodal shipping documents (rate confirmations, bills of lading, booking confirmations, delivery orders).
 
 DOCUMENT TEXT:
-${pdfText.substring(0, 8000)}
+${pdfText.substring(0, 10000)}
 
-Extract and return ONLY a valid JSON object with the following structure (use null for fields not found):
+TASK: Extract ALL shipment information and return ONLY a valid JSON object.
 
+IMPORTANT HINTS:
+- Look for "CONSIGNEE" or "DELIVER TO" = delivery location (for imports)
+- Look for "SHIPPER" or "PICK UP FROM" = pickup location (for exports)
+- Container numbers are 4 letters + 7 digits (e.g., MSCU1234567, MAEU1234567)
+- Look for LFD, Last Free Day, Free Time, Demurrage dates
+- Look for SSL, Steamship Line, Carrier names (Maersk, MSC, COSCO, CMA CGM, Hapag-Lloyd, ONE, Evergreen, Yang Ming, HMM, ZIM)
+- Terminals: APM, LBCT, TraPac, PCT, Fenix, YTI, ITS, SSA, TTI, Yusen, Pier 400
+- 40HC or 40'HC means 40ft High Cube container
+- Weight over 44,000 lbs is overweight
+
+JSON STRUCTURE (use null for fields not found):
 {
-  "type": "IMPORT" or "EXPORT" (determine from context - imports come FROM port, exports go TO port),
-  "customerName": "shipper or consignee company name",
-  "steamshipLine": "shipping line name (Maersk, MSC, COSCO, CMA CGM, Hapag-Lloyd, ONE, Evergreen, Yang Ming, HMM, ZIM)",
-  "bookingNumber": "booking or confirmation number",
-  "billOfLading": "bill of lading or BL number",
+  "type": "IMPORT" or "EXPORT",
+  "customerName": "company receiving/sending goods",
+  "steamshipLine": "shipping line name",
+  "bookingNumber": "booking/reference number",
+  "billOfLading": "B/L number",
   "vessel": "vessel name",
   "voyage": "voyage number",
-  "terminalName": "port terminal name",
-  "lastFreeDay": "YYYY-MM-DD format or null",
-  "portCutoff": "YYYY-MM-DD format or null",
-  "earliestReturnDate": "YYYY-MM-DD format or null",
+  "terminalName": "LA/LB port terminal",
+  "lastFreeDay": "YYYY-MM-DD",
+  "portCutoff": "YYYY-MM-DD",
+  "earliestReturnDate": "YYYY-MM-DD",
 
-  "deliveryLocationName": "delivery location/company name",
+  "deliveryLocationName": "company/warehouse name",
   "deliveryAddress": "street address",
-  "deliveryCity": "city",
-  "deliveryState": "2-letter state code",
-  "deliveryZip": "ZIP code",
-  "deliveryContactName": "contact person name",
-  "deliveryContactPhone": "phone number",
+  "deliveryCity": "city name",
+  "deliveryState": "CA",
+  "deliveryZip": "90001",
+  "deliveryContactName": "contact name",
+  "deliveryContactPhone": "phone",
 
-  "pickupLocationName": "pickup location/company name",
+  "pickupLocationName": "company/warehouse name",
   "pickupAddress": "street address",
-  "pickupCity": "city",
-  "pickupState": "2-letter state code",
-  "pickupZip": "ZIP code",
-  "pickupContactName": "contact person name",
-  "pickupContactPhone": "phone number",
+  "pickupCity": "city name",
+  "pickupState": "CA",
+  "pickupZip": "90001",
 
   "containers": [
     {
-      "containerNumber": "11-character container number (e.g., MSCU1234567)",
-      "size": "20", "40", or "45",
-      "type": "DRY", "HIGH_CUBE", "REEFER", "TANK", "FLAT_RACK", or "OPEN_TOP",
-      "weightLbs": weight in pounds as number or null,
-      "sealNumber": "seal number or null",
-      "isHazmat": true/false,
-      "hazmatClass": "hazmat class 1-9 or null",
-      "hazmatUnNumber": "UN number or null",
-      "isOverweight": true/false,
-      "isReefer": true/false,
-      "reeferTemp": temperature in Fahrenheit or null
+      "containerNumber": "MSCU1234567",
+      "size": "20" or "40" or "45",
+      "type": "DRY" or "HIGH_CUBE" or "REEFER",
+      "weightLbs": 42000,
+      "sealNumber": "ABC123",
+      "isHazmat": false,
+      "isOverweight": false,
+      "isReefer": false
     }
   ],
 
-  "specialInstructions": "any special handling notes or instructions",
-  "confidence": 0.0-1.0 (your confidence in the extraction accuracy)
+  "specialInstructions": "any notes",
+  "confidence": 0.85
 }
 
-Important:
-- Container numbers must be exactly 11 characters (4 letters + 7 digits)
-- Dates must be in YYYY-MM-DD format
-- State codes must be 2-letter US abbreviations
-- Return ONLY the JSON object, no explanations`;
+RULES:
+- Container numbers MUST be exactly 11 characters (4 letters + 7 digits)
+- All dates in YYYY-MM-DD format
+- Weight > 44000 lbs means isOverweight: true
+- Return ONLY valid JSON, no text before or after`;
 }
 
 // Rule-based extraction fallback
@@ -136,11 +142,30 @@ export function extractWithRules(text: string): ExtractedLoadData {
 
   const upperText = text.toUpperCase();
 
-  // Determine type
-  if (upperText.includes('IMPORT') || upperText.includes('INBOUND') || upperText.includes('ARRIVAL')) {
+  // Normalize text for better pattern matching (collapse whitespace)
+  const normalizedText = text.replace(/\s+/g, ' ');
+
+  // Determine type - check multiple indicators
+  const importIndicators = ['IMPORT', 'INBOUND', 'ARRIVAL', 'DELIVERY ORDER', 'CONSIGNEE', 'DELIVER TO'];
+  const exportIndicators = ['EXPORT', 'OUTBOUND', 'DEPARTURE', 'SHIPPER', 'PICK UP', 'PICKUP FROM'];
+
+  let importScore = 0;
+  let exportScore = 0;
+
+  for (const indicator of importIndicators) {
+    if (upperText.includes(indicator)) importScore++;
+  }
+  for (const indicator of exportIndicators) {
+    if (upperText.includes(indicator)) exportScore++;
+  }
+
+  if (importScore > exportScore) {
     data.type = 'IMPORT';
-  } else if (upperText.includes('EXPORT') || upperText.includes('OUTBOUND') || upperText.includes('DEPARTURE')) {
+  } else if (exportScore > importScore) {
     data.type = 'EXPORT';
+  } else if (upperText.includes('LFD') || upperText.includes('LAST FREE DAY')) {
+    // LFD typically indicates import
+    data.type = 'IMPORT';
   }
 
   // Extract container numbers
@@ -239,14 +264,17 @@ export function extractWithRules(text: string): ExtractedLoadData {
     }
   }
 
-  // Extract dates (various formats)
-  const datePatterns = [
+  // Extract dates (various formats) - including written month formats
+  const lfdPatterns = [
     /LAST\s*FREE\s*(?:DAY|DATE)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
     /LFD\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
     /FREE\s*TIME\s*(?:EXPIRES?|ENDS?)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+    /LFD\s*:?\s*(\w+\s+\d{1,2},?\s+\d{4})/i, // "Jan 15, 2024" format
+    /LAST\s*FREE\s*(?:DAY)?\s*:?\s*(\w+\s+\d{1,2},?\s+\d{4})/i,
+    /DEMURRAGE\s*(?:STARTS?)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
   ];
 
-  for (const pattern of datePatterns) {
+  for (const pattern of lfdPatterns) {
     const match = text.match(pattern);
     if (match) {
       data.lastFreeDay = normalizeDate(match[1]);
@@ -258,6 +286,8 @@ export function extractWithRules(text: string): ExtractedLoadData {
   const cutoffPatterns = [
     /PORT\s*CUT\s*(?:OFF)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
     /CUT\s*(?:OFF)?\s*(?:DATE|TIME)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+    /CARGO\s*CUT\s*(?:OFF)?\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+    /CUTOFF\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
   ];
 
   for (const pattern of cutoffPatterns) {
@@ -265,6 +295,25 @@ export function extractWithRules(text: string): ExtractedLoadData {
     if (match) {
       data.portCutoff = normalizeDate(match[1]);
       break;
+    }
+  }
+
+  // Extract customer/consignee name
+  const customerPatterns = [
+    /CONSIGNEE\s*:?\s*([A-Z][A-Za-z\s&.,]+?)(?:\n|$|NOTIFY|ADDRESS|PHONE)/i,
+    /DELIVER\s*(?:TO)?\s*:?\s*([A-Z][A-Za-z\s&.,]+?)(?:\n|$|ADDRESS|PHONE)/i,
+    /SHIPPER\s*:?\s*([A-Z][A-Za-z\s&.,]+?)(?:\n|$|NOTIFY|ADDRESS|PHONE)/i,
+    /CUSTOMER\s*:?\s*([A-Z][A-Za-z\s&.,]+?)(?:\n|$|ADDRESS|PHONE)/i,
+  ];
+
+  for (const pattern of customerPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const name = match[1].trim().replace(/\s+/g, ' ');
+      if (name.length > 3 && name.length < 100) {
+        data.customerName = name;
+        break;
+      }
     }
   }
 
