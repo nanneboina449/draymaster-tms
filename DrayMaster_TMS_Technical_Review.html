@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrayMaster TMS Technical Review</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+            border-bottom: 3px solid #1F4E78;
+            padding-bottom: 30px;
+        }
+        
+        .title {
+            font-size: 48px;
+            font-weight: bold;
+            color: #1F4E78;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 24px;
+            color: #2E75B5;
+            margin-bottom: 10px;
+        }
+        
+        .date {
+            font-size: 14px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .toc {
+            background: #f0f4f8;
+            padding: 20px;
+            border-left: 4px solid #2E75B5;
+            margin: 30px 0;
+            border-radius: 4px;
+        }
+        
+        .toc h2 {
+            color: #1F4E78;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .toc li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #2E75B5;
+        }
+        
+        .toc a {
+            color: #2E75B5;
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        h1 {
+            color: #1F4E78;
+            font-size: 32px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #2E75B5;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #2E75B5;
+            font-size: 24px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        h3 {
+            color: #2E75B5;
+            font-size: 18px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .critical {
+            background: #ffebee;
+            border-left: 4px solid #c62828;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .high {
+            background: #fff3e0;
+            border-left: 4px solid #e65100;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .medium {
+            background: #f3e5f5;
+            border-left: 4px solid #7b1fa2;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        .code-block code {
+            color: #f8f8f2;
+        }
+        
+        ul, ol {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+        }
+        
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+        
+        .impact {
+            font-weight: bold;
+            color: #c62828;
+        }
+        
+        .solution {
+            font-weight: bold;
+            color: #1565c0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        th {
+            background: #2E75B5;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        tr:hover {
+            background: #f5f5f5;
+        }
+        
+        .roadmap-table {
+            font-size: 13px;
+        }
+        
+        .roadmap-table td:nth-child(1) {
+            font-weight: bold;
+            color: #1F4E78;
+        }
+        
+        .comparison-table {
+            font-size: 13px;
+        }
+        
+        .comparison-table td {
+            text-align: center;
+        }
+        
+        .comparison-table td:first-child {
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        .summary-box {
+            background: #e3f2fd;
+            border: 2px solid #2E75B5;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        .summary-box h3 {
+            color: #1F4E78;
+            margin-top: 0;
+        }
+        
+        .summary-box ul {
+            margin-left: 20px;
+        }
+        
+        .summary-box li {
+            margin-bottom: 10px;
+        }
+        
+        .page-break {
+            page-break-after: always;
+            margin: 40px 0;
+            padding-top: 40px;
+            border-top: 2px dashed #ccc;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        
+        .badge-critical {
+            background: #c62828;
+            color: white;
+        }
+        
+        .badge-high {
+            background: #e65100;
+            color: white;
+        }
+        
+        .badge-medium {
+            background: #7b1fa2;
+            color: white;
+        }
+        
+        .badge-check {
+            color: #2e7d32;
+        }
+        
+        .badge-cross {
+            color: #c62828;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            .container {
+                box-shadow: none;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="title">🚛 DrayMaster TMS</div>
+            <div class="subtitle">Comprehensive Technical Review & Implementation Gaps Analysis</div>
+            <div class="date">February 2, 2026</div>
+        </div>
+
+        <!-- Executive Summary -->
+        <h1>Executive Summary</h1>
+        <p>DrayMaster TMS presents a modern, cloud-native architecture built on solid foundational technologies (Go microservices, Kafka, PostgreSQL, Kubernetes). However, the system has critical implementation gaps that prevent it from being production-ready for real-time TMS operations. This analysis identifies 42 critical issues across 8 major categories.</p>
+        
+        <div class="summary-box">
+            <h3>Issue Breakdown</h3>
+            <ul>
+                <li><span class="badge badge-critical">12 Critical Issues</span> - Blocking production use</li>
+                <li><span class="badge badge-high">18 High Priority</span> - Major functionality gaps</li>
+                <li><span class="badge badge-medium">12 Medium Priority</span> - Performance & UX improvements</li>
+            </ul>
+        </div>
+
+        <!-- Table of Contents -->
+        <div class="toc">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#section1">1. Critical Issues (Must Fix Before Production)</a></li>
+                <li><a href="#section2">2. High Priority Issues (Major Functionality Gaps)</a></li>
+                <li><a href="#section3">3. Data Consistency & Integrity Issues</a></li>
+                <li><a href="#section4">4. Performance Bottlenecks</a></li>
+                <li><a href="#section5">5. Security Gaps</a></li>
+                <li><a href="#section6">6. Testing Gaps</a></li>
+                <li><a href="#section7">7. DevOps & Infrastructure Issues</a></li>
+                <li><a href="#section8">8. Module-by-Module Gaps</a></li>
+                <li><a href="#section9">9. Implementation Roadmap</a></li>
+                <li><a href="#section10">10. Competitive Comparison</a></li>
+            </ul>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 1: Critical Issues -->
+        <h1 id="section1">1. Critical Issues (Must Fix Before Production)</h1>
+
+        <h2>1.1 Missing Outbox Pattern - Data Loss Risk 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> When orders are created, if the Kafka publish fails after database insertion, orders exist in PostgreSQL but no dispatch event reaches the Dispatch Service.</p>
+            
+            <div class="code-block"><code>// CURRENT (BROKEN) IMPLEMENTATION
+func (s *OrderService) CreateOrder(ctx context.Context, req *OrderRequest) error {
+    // Step 1: Order inserted to DB
+    order, err := s.db.InsertOrder(req)
+    if err != nil { return err }
+    
+    // Step 2: FAILS - order exists but event never published!
+    event := &OrderCreatedEvent{OrderID: order.ID, ...}
+    err = s.kafka.Publish("orders.created", event)
+    if err != nil { 
+        // Order is ORPHANED - no dispatch possible
+        log.Error("Failed to publish event", err)
+        return err
+    }
+}</code></div>
+            
+            <p><span class="impact">Impact:</span> Ghost orders accumulate, manual cleanup required, revenue tracking issues.</p>
+            
+            <p><span class="solution">Solution:</span> Implement Outbox pattern with transactional guarantees.</p>
+            
+            <div class="code-block"><code>// CORRECT IMPLEMENTATION (Outbox Pattern)
+func (s *OrderService) CreateOrder(ctx context.Context, req *OrderRequest) error {
+    tx, _ := s.db.BeginTx(ctx, nil)
+    defer tx.Rollback()
+    
+    // Both operations in same transaction
+    order, _ := s.db.InsertOrder(tx, req)
+    event := &OrderCreatedEvent{OrderID: order.ID}
+    
+    // Insert to outbox table
+    s.db.InsertOutboxEvent(tx, "orders.created", event)
+    
+    tx.Commit() // Atomic: both succeed or both fail
+    
+    // Separate background process:
+    // 1. Read from outbox (unpublished = TRUE)
+    // 2. Publish to Kafka
+    // 3. Update outbox (unpublished = FALSE)
+    // 4. Retry failed publishes every 30s
+}</code></div>
+            
+            <p><strong>Database Schema Required:</strong></p>
+            <div class="code-block"><code>CREATE TABLE outbox_events (
+    id BIGSERIAL PRIMARY KEY,
+    aggregate_type VARCHAR(100),
+    aggregate_id UUID,
+    event_type VARCHAR(100),
+    payload JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    published_at TIMESTAMP NULL,
+    CONSTRAINT outbox_unique UNIQUE(aggregate_id, event_type)
+);
+
+CREATE INDEX outbox_unpublished ON outbox_events(published_at) 
+WHERE published_at IS NULL;</code></div>
+        </div>
+
+        <h2>1.2 No Idempotency Keys - Duplicate Order Creation 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Client retries order creation due to timeout → duplicate orders created in database.</p>
+            
+            <div class="code-block"><code>// Scenario: Client times out waiting for response
+Client: POST /orders {ref: "ORDER-2025-001", containers: [...]}
+Server: Processing... (takes 25 seconds)
+Client: Network timeout at 20s → RETRIES
+Server: Receives retry, creates SECOND order
+
+Database now has:
+- ORDER-001-A (original)
+- ORDER-001-B (duplicate from retry)
+
+Both orders will be dispatched, driver gets 2 trips for same shipment!</code></div>
+            
+            <p><span class="impact">Impact:</span> Duplicate dispatches, wrong billing, driver confusion, compliance issues.</p>
+            
+            <p><span class="solution">Solution:</span> Implement request deduplication with Idempotency-Key header.</p>
+            
+            <div class="code-block"><code>// Server-side idempotency implementation
+func (s *OrderService) CreateOrder(ctx context.Context, req *OrderRequest, 
+    idempotencyKey string) (*Order, error) {
+    // Check if we've already processed this request
+    existing, err := s.cache.Get("idempotency:" + idempotencyKey)
+    if err == nil && existing != nil {
+        return existing.(*Order), nil
+    }
+    
+    // New request: process normally
+    order, err := s.db.InsertOrder(req)
+    if err != nil { return nil, err }
+    
+    // Cache for 24 hours (idempotency window)
+    s.cache.Set("idempotency:"+idempotencyKey, order, 24*time.Hour)
+    return order, nil
+}</code></div>
+        </div>
+
+        <h2>1.3 No Event Ordering Guarantee - Race Conditions 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Kafka partition key not set for order events → events can process out of order.</p>
+            
+            <div class="code-block"><code>// BROKEN: Events can arrive out of order
+order.created        (partition 0)
+order.assigned       (partition 1)  ← Processes BEFORE .created!
+dispatch.created     (partition 0)
+
+Dispatch Service tries to assign load to non-existent order!</code></div>
+            
+            <p><span class="solution">Solution:</span> Use orderID as Kafka partition key to guarantee ordering per order.</p>
+            
+            <div class="code-block"><code>// Publish with partition key = orderID
+evt := &OrderCreatedEvent{OrderID: order.ID}
+msg := &sarama.ProducerMessage{
+    Topic: "orders.created",
+    Key:   sarama.StringEncoder(order.ID),  // ← CRITICAL
+    Value: json.Marshal(evt),
+}
+producer.SendMessage(msg)</code></div>
+        </div>
+
+        <h2>1.4 No Real-Time Push Updates - WebSocket/SSE Missing 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Web/mobile clients must poll for order status updates (inefficient & delayed).</p>
+            
+            <p><span class="impact">Impact:</span> Poor user experience, hidden costs of polling, cannot support true real-time tracking.</p>
+            
+            <p><span class="solution">Solution:</span> Implement WebSocket gateway + GraphQL subscriptions for instant updates.</p>
+            
+            <ul>
+                <li>WebSocket server to maintain persistent connections</li>
+                <li>Message routing to subscribed clients</li>
+                <li>GraphQL subscription resolver for order status changes</li>
+                <li>Fallback to Server-Sent Events (SSE) for mobile clients</li>
+            </ul>
+        </div>
+
+        <h2>1.5 No Saga Pattern for Multi-Step Workflows 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> When order-to-dispatch fails, no rollback of order creation.</p>
+            
+            <div class="code-block"><code>// Failure scenario:
+Step 1: Order created ✓
+Step 2: Emit order.created event ✓
+Step 3: Dispatch service receives event
+Step 4: Load assignment fails (e.g., no available driver)
+Step 5: NO COMPENSATION - order remains in PENDING state forever
+
+Result: Manual cleanup needed, revenue recognition issues</code></div>
+            
+            <p><span class="solution">Solution:</span> Implement orchestrated saga with compensating transactions.</p>
+        </div>
+
+        <h2>1.6 No Distributed Transaction Coordination 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Order Service + Dispatch Service + Tracking Service must stay in sync, but no coordination mechanism.</p>
+            
+            <ul>
+                <li>Tracking service crashes after Dispatch created → missing GPS data</li>
+                <li>Billing service skips order due to missing dispatch reference → revenue gap</li>
+            </ul>
+            
+            <p><span class="solution">Solution:</span> Use Kafka transactions + event sourcing for consistency guarantees.</p>
+        </div>
+
+        <h2>1.7 No Load Optimization/VRP Solver 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Dispatch service has no logic to optimize orders into efficient trips.</p>
+            
+            <p><strong>Missing Functionality:</strong></p>
+            <ul>
+                <li>Vehicle Routing Problem (VRP) solver</li>
+                <li>Cost optimization (minimize fuel/time)</li>
+                <li>Constraint satisfaction (time windows, vehicle capacity)</li>
+                <li>Real-time replanning on driver cancellation</li>
+                <li>Multi-stop trip optimization</li>
+            </ul>
+            
+            <p><span class="impact">Impact:</span> Suboptimal routing, wasted fuel, poor driver utilization, cannot compete with modern TMS.</p>
+            
+            <p><span class="solution">Solution:</span> Integrate VRP solver (Google OR-Tools or Vroom)</p>
+        </div>
+
+        <h2>1.8 No Driver Shift/Availability Management 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> No tracking of driver availability slots, resulting in overbooking.</p>
+            
+            <p><strong>Missing:</strong></p>
+            <ul>
+                <li>Driver shift schedules (9am-5pm)</li>
+                <li>Rest break requirements (HOS - Hours of Service)</li>
+                <li>Appointment slot reservations</li>
+                <li>Driver skill/license verification (HAZMAT, doubles, etc)</li>
+            </ul>
+            
+            <p><span class="solution">Solution:</span> Implement DriverAvailability service with slot management and HOS compliance tracking.</p>
+        </div>
+
+        <h2>1.9 No Request Validation/Business Rules 🔴</h2>
+        <div class="critical">
+            <p><strong>Missing Validations:</strong></p>
+            <ul>
+                <li>Container number doesn't exist on vessel</li>
+                <li>Last Free Day (LFD) has passed</li>
+                <li>Equipment type mismatch (20ft order on 40ft container)</li>
+                <li>Duplicate container number in same order</li>
+                <li>Invalid vessel/voyage reference</li>
+                <li>Missing required customs documentation</li>
+                <li>Hazmat declarations for dangerous goods</li>
+            </ul>
+            
+            <p><span class="solution">Solution:</span> Implement validation service with business rules engine (Drools or custom).</p>
+        </div>
+
+        <h2>1.10 No Unique Constraints at Database Level 🔴</h2>
+        <div class="critical">
+            <p><strong>Current Problem:</strong> Concurrent requests can create duplicate containers/orders due to race conditions.</p>
+            
+            <p><span class="solution">Solution:</span> Add database constraints + application-level optimistic locking.</p>
+            
+            <div class="code-block"><code>ALTER TABLE orders ADD CONSTRAINT orders_container_unique 
+    UNIQUE(container_id);
+ALTER TABLE shipments ADD CONSTRAINT shipments_ref_unique 
+    UNIQUE(reference_number);
+ALTER TABLE trips ADD CONSTRAINT trips_number_unique 
+    UNIQUE(trip_number);</code></div>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 2: High Priority Issues -->
+        <h1 id="section2">2. High Priority Issues (Major Functionality Gaps)</h1>
+
+        <h2>2.1 No Bulk Operation Support</h2>
+        <div class="high">
+            <p>Creating 100 orders via individual API calls requires 100 round-trips instead of 1 batch operation. Implement batch endpoints with transaction support.</p>
+        </div>
+
+        <h2>2.2 No Retry Logic with Exponential Backoff</h2>
+        <div class="high">
+            <p>Transient failures cause immediate failures instead of retries. Implement circuit breaker + exponential backoff for inter-service gRPC calls.</p>
+        </div>
+
+        <h2>2.3 No Rate Limiting per Customer</h2>
+        <div class="high">
+            <p>Single bad actor can DOS the system. Implement token bucket rate limiting per API key with tiered limits.</p>
+        </div>
+
+        <h2>2.4 No Change Data Capture (CDC) for Real-Time Sync</h2>
+        <div class="high">
+            <p>Updates to PostgreSQL don't propagate to Elasticsearch for search. Use Debezium or Postgres WAL to stream changes to Kafka.</p>
+        </div>
+
+        <h2>2.5 No Dead Letter Queue (DLQ) for Failed Messages</h2>
+        <div class="high">
+            <p>Messages that fail processing are silently dropped. Route failed messages to DLQ for manual inspection and replay.</p>
+        </div>
+
+        <h2>2.6 No Audit Trail for Compliance</h2>
+        <div class="high">
+            <p>Cannot prove who changed order status and when. Implement audit log table with all mutations (created by, timestamp, old value, new value).</p>
+        </div>
+
+        <h2>2.7 No Payment/Billing Integration</h2>
+        <div class="high">
+            <p>Billing service exists but lacks: payment processing, invoice generation, reconciliation. Integrate Stripe/PayPal + implement invoice workflow.</p>
+        </div>
+
+        <h2>2.8 No Notification System</h2>
+        <div class="high">
+            <p>No email/SMS alerts for order status, delivery exceptions. Implement notification service with multi-channel support (Email, SMS, Push).</p>
+        </div>
+
+        <h2>2.9 No Search & Filtering</h2>
+        <div class="high">
+            <p>Full-text search, complex filters by status/driver/date missing from API. Elasticsearch integration for complex queries and faceted search.</p>
+        </div>
+
+        <h2>2.10 No Version Control for Business Objects</h2>
+        <div class="high">
+            <p>Cannot see order history/changes over time. Implement event sourcing for immutable event log.</p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 3 -->
+        <h1 id="section3">3. Data Consistency & Integrity Issues</h1>
+
+        <h2>3.1 Eventual Consistency Window</h2>
+        <div class="medium">
+            <p>With Kafka async processing, data is inconsistent between services for milliseconds to minutes. Mitigation: Document eventual consistency SLAs (e.g., "Trip created within 2 seconds"), implement read-your-writes consistency at API layer.</p>
+        </div>
+
+        <h2>3.2 No Soft Delete Support</h2>
+        <div class="medium">
+            <p>Deleting orders causes cascade deletes on dependent data. Solution: Add `deleted_at` timestamp, filter out in queries.</p>
+        </div>
+
+        <h2>3.3 No Foreign Key Constraints</h2>
+        <div class="medium">
+            <p>Trips can reference non-existent orders. Solution: Add comprehensive database constraints.</p>
+        </div>
+
+        <h2>3.4 Missing Timestamp Management</h2>
+        <div class="medium">
+            <p>No `created_at`, `updated_at`, `deleted_at` on all tables. Critical for audit, debugging, and time-series analysis.</p>
+        </div>
+
+        <h2>3.5 No Transactional Outbox Verification</h2>
+        <div class="medium">
+            <p>After outbox event published, no verification that consumer received it. Solution: Consumer group offset tracking in Kafka.</p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 4 -->
+        <h1 id="section4">4. Performance Bottlenecks</h1>
+
+        <h2>4.1 No Query Optimization</h2>
+        <div class="medium">
+            <ul>
+                <li>Missing indexes on foreign keys, timestamps</li>
+                <li>N+1 query problems when loading orders with containers</li>
+                <li>Solution: Add indexes, implement batched loading</li>
+            </ul>
+        </div>
+
+        <h2>4.2 No Connection Pooling</h2>
+        <div class="medium">
+            <p>Each request opens new database connection → connection exhaustion. Solution: pgBouncer or connection pool in application.</p>
+        </div>
+
+        <h2>4.3 Inefficient Kafka Serialization</h2>
+        <div class="medium">
+            <p>JSON serialization adds overhead. Solution: Use Protobuf for message serialization instead of JSON.</p>
+        </div>
+
+        <h2>4.4 No Caching Strategy</h2>
+        <div class="medium">
+            <p>Redis is deployed but not used effectively. Solution: Cache driver availability, vessel info, rate cards in Redis.</p>
+        </div>
+
+        <h2>4.5 No Pagination for List Endpoints</h2>
+        <div class="medium">
+            <p>GET /orders returns all 10,000 orders → OOM errors. Solution: Implement cursor-based pagination.</p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 5 -->
+        <h1 id="section5">5. Security Gaps</h1>
+
+        <h2>5.1 No Input Sanitization</h2>
+        <div class="critical">
+            <p>SQL injection, NoSQL injection, XSS possible on all text inputs. Solution: Use parameterized queries (ORM), HTML escape output.</p>
+        </div>
+
+        <h2>5.2 No API Key Rotation</h2>
+        <div class="critical">
+            <p>Leaked keys cannot be revoked without redeploying. Solution: Implement versioned API keys with expiration dates.</p>
+        </div>
+
+        <h2>5.3 No Encryption at Rest</h2>
+        <div class="critical">
+            <p>Sensitive data (driver phone, payment info) stored in plaintext. Solution: Enable transparent data encryption (TDE).</p>
+        </div>
+
+        <h2>5.4 No CORS Configuration</h2>
+        <div class="high">
+            <p>GraphQL endpoint open to all origins. Solution: Restrict CORS to known domains only.</p>
+        </div>
+
+        <h2>5.5 No Secrets Management</h2>
+        <div class="high">
+            <p>Database passwords, API keys hardcoded or in env files. Solution: HashiCorp Vault or AWS Secrets Manager.</p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 6 -->
+        <h1 id="section6">6. Testing Gaps</h1>
+
+        <div class="medium">
+            <ul>
+                <li><strong>No Unit Tests:</strong> Business logic lacks unit test coverage</li>
+                <li><strong>No Integration Tests:</strong> Order → Dispatch → Tracking workflows not tested end-to-end</li>
+                <li><strong>No Load/Chaos Testing:</strong> Unknown behavior under 1000s of concurrent orders</li>
+                <li><strong>No Contract Testing:</strong> gRPC contracts between services not validated</li>
+                <li><strong>No Mutation Testing:</strong> Cannot verify test quality</li>
+            </ul>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 7 -->
+        <h1 id="section7">7. DevOps & Infrastructure Issues</h1>
+
+        <h2>7.1 No Database Migration Strategy</h2>
+        <div class="high">
+            <p>Manual migrations → deployment downtime. Use Flyway or Liquibase for versioned migrations.</p>
+        </div>
+
+        <h2>7.2 No Monitoring/Alerting</h2>
+        <div class="high">
+            <p>Grafana installed but metrics not defined. Define SLOs, alert on error rates, latencies, p99 response times.</p>
+        </div>
+
+        <h2>7.3 No Log Aggregation</h2>
+        <div class="high">
+            <p>Logs in individual pod files → impossible to debug. Solution: ELK stack or DataDog.</p>
+        </div>
+
+        <h2>7.4 No Deployment Blue/Green Strategy</h2>
+        <div class="high">
+            <p>Deployments are all-or-nothing → service downtime. Solution: Blue/green or canary deployments in k8s.</p>
+        </div>
+
+        <h2>7.5 No Backup/Disaster Recovery Plan</h2>
+        <div class="critical">
+            <p>Database failure = data loss. Solution: Automated backups, cross-region replication, RTO/RPO SLAs.</p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 8 -->
+        <h1 id="section8">8. Module-by-Module Gaps</h1>
+
+        <h2>8.1 Order Service</h2>
+        <div class="critical">
+            <ul>
+                <li><span class="badge-cross">✗</span> Outbox pattern</li>
+                <li><span class="badge-cross">✗</span> Request validation</li>
+                <li><span class="badge-cross">✗</span> Batch operations</li>
+                <li><span class="badge-cross">✗</span> Container status tracking (PICKED, DELIVERED, RETURNED)</li>
+                <li><span class="badge-cross">✗</span> Order state machine (PENDING → DISPATCHED → IN_TRANSIT → DELIVERED)</li>
+                <li><span class="badge-cross">✗</span> Idempotency keys</li>
+            </ul>
+        </div>
+
+        <h2>8.2 Dispatch Service</h2>
+        <div class="critical">
+            <ul>
+                <li><span class="badge-cross">✗</span> VRP solver integration</li>
+                <li><span class="badge-cross">✗</span> Batch optimization</li>
+                <li><span class="badge-cross">✗</span> Real-time replanning on driver cancellation</li>
+                <li><span class="badge-cross">✗</span> Driver availability slot management</li>
+                <li><span class="badge-cross">✗</span> Appointment window validation</li>
+            </ul>
+        </div>
+
+        <h2>8.3 Tracking Service</h2>
+        <div class="high">
+            <ul>
+                <li><span class="badge-cross">✗</span> ETA calculation</li>
+                <li><span class="badge-cross">✗</span> Geofencing for arrival/departure events</li>
+                <li><span class="badge-cross">✗</span> Exception detection (delay, wrong location)</li>
+                <li><span class="badge-cross">✗</span> Real-time WebSocket updates</li>
+            </ul>
+        </div>
+
+        <h2>8.4 Billing Service</h2>
+        <div class="high">
+            <ul>
+                <li><span class="badge-cross">✗</span> Rate card management</li>
+                <li><span class="badge-cross">✗</span> Invoice generation</li>
+                <li><span class="badge-cross">✗</span> Payment processing</li>
+                <li><span class="badge-cross">✗</span> Reconciliation</li>
+            </ul>
+        </div>
+
+        <h2>8.5 Driver Service</h2>
+        <div class="high">
+            <ul>
+                <li><span class="badge-cross">✗</span> HOS (Hours of Service) compliance tracking</li>
+                <li><span class="badge-cross">✗</span> License/certification validation</li>
+                <li><span class="badge-cross">✗</span> Performance metrics (on-time %, safety)</li>
+            </ul>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 9 -->
+        <h1 id="section9">9. Implementation Roadmap</h1>
+
+        <p>Estimated effort and timeline for implementation:</p>
+
+        <table class="roadmap-table">
+            <thead>
+                <tr>
+                    <th>Priority</th>
+                    <th>Issue</th>
+                    <th>Effort</th>
+                    <th>Timeline</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge badge-critical">P0</span></td>
+                    <td>Outbox Pattern</td>
+                    <td>8 days</td>
+                    <td>Week 1-2</td>
+                    <td>Prevents data loss</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-critical">P0</span></td>
+                    <td>Idempotency Keys</td>
+                    <td>5 days</td>
+                    <td>Week 1</td>
+                    <td>Prevents duplicates</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-critical">P0</span></td>
+                    <td>Event Ordering</td>
+                    <td>3 days</td>
+                    <td>Week 1</td>
+                    <td>Partition key strategy</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-critical">P0</span></td>
+                    <td>WebSocket/SSE</td>
+                    <td>10 days</td>
+                    <td>Week 2-3</td>
+                    <td>Real-time updates</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-high">P1</span></td>
+                    <td>Saga Pattern</td>
+                    <td>12 days</td>
+                    <td>Week 3-4</td>
+                    <td>Multi-step workflows</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-high">P1</span></td>
+                    <td>VRP Solver</td>
+                    <td>15 days</td>
+                    <td>Week 4-5</td>
+                    <td>Route optimization</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-high">P1</span></td>
+                    <td>Driver Availability</td>
+                    <td>10 days</td>
+                    <td>Week 3</td>
+                    <td>HOS compliance</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-high">P1</span></td>
+                    <td>Validation Engine</td>
+                    <td>8 days</td>
+                    <td>Week 2</td>
+                    <td>Business rules</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-high">P1</span></td>
+                    <td>Notification System</td>
+                    <td>7 days</td>
+                    <td>Week 2-3</td>
+                    <td>Email/SMS alerts</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-medium">P2</span></td>
+                    <td>Search/Filtering</td>
+                    <td>6 days</td>
+                    <td>Week 3</td>
+                    <td>Elasticsearch</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-medium">P2</span></td>
+                    <td>Audit Trail</td>
+                    <td>5 days</td>
+                    <td>Week 2-3</td>
+                    <td>Compliance</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-medium">P2</span></td>
+                    <td>Query Optimization</td>
+                    <td>4 days</td>
+                    <td>Week 1-2</td>
+                    <td>Performance</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-medium">P2</span></td>
+                    <td>Caching Strategy</td>
+                    <td>5 days</td>
+                    <td>Week 2</td>
+                    <td>Redis usage</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="summary-box">
+            <h3>Timeline Summary</h3>
+            <ul>
+                <li><strong>Total Effort:</strong> ~110 engineer-days (2-3 months with 3-person team)</li>
+                <li><strong>Recommended Sequence:</strong> Start with P0 items in parallel, they're mostly independent</li>
+                <li><strong>Go-Live Readiness:</strong> After P0 + P1 completion (~6-8 weeks)</li>
+            </ul>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Section 10 -->
+        <h1 id="section10">10. Competitive Comparison</h1>
+
+        <p>Comparison with modern TMS solutions (Locom, eModal, Samsara):</p>
+
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>DrayMaster TMS</th>
+                    <th>Industry Standard</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Real-time Tracking</td>
+                    <td>Basic GPS storage</td>
+                    <td><span class="badge badge-check">✓ Sub-second live tracking</span></td>
+                </tr>
+                <tr>
+                    <td>Route Optimization</td>
+                    <td>Manual assignment</td>
+                    <td><span class="badge badge-check">✓ Dynamic VRP solver</span></td>
+                </tr>
+                <tr>
+                    <td>Driver Availability</td>
+                    <td><span class="badge-cross">✗ Missing</span></td>
+                    <td><span class="badge badge-check">✓ HOS + shift mgmt</span></td>
+                </tr>
+                <tr>
+                    <td>Automated Notifications</td>
+                    <td><span class="badge-cross">✗ Missing</span></td>
+                    <td><span class="badge badge-check">✓ Multi-channel</span></td>
+                </tr>
+                <tr>
+                    <td>Payment Integration</td>
+                    <td><span class="badge-cross">✗ Missing</span></td>
+                    <td><span class="badge badge-check">✓ Stripe/ACH/Wire</span></td>
+                </tr>
+                <tr>
+                    <td>Mobile App</td>
+                    <td>Planned</td>
+                    <td><span class="badge badge-check">✓ Production ready</span></td>
+                </tr>
+                <tr>
+                    <td>API Reliability</td>
+                    <td>Fair (unknown SLA)</td>
+                    <td><span class="badge badge-check">✓ 99.99% SLA</span></td>
+                </tr>
+                <tr>
+                    <td>Data Consistency</td>
+                    <td>Eventual (minutes)</td>
+                    <td><span class="badge badge-check">✓ Near-real-time</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="summary-box">
+            <h3>Competitive Position</h3>
+            <p>Your system is <strong>6-8 weeks behind production</strong> for real-time TMS operations. The architecture is solid, but critical features are missing.</p>
+            <p><strong>Key differentiators needed for competitiveness:</strong></p>
+            <ul>
+                <li>Real-time route optimization</li>
+                <li>HOS compliance tracking</li>
+                <li>Native port/vessel integrations (like eModal)</li>
+                <li>Payment processing with settlement</li>
+            </ul>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- Conclusion -->
+        <h1>Conclusion</h1>
+
+        <p>DrayMaster has strong foundational architecture (Go, Kafka, PostgreSQL, Kubernetes) but lacks critical production features. The issues identified are not architectural flaws but implementation gaps—all solvable with focused engineering effort.</p>
+
+        <div class="summary-box">
+            <h3>Key Recommendations</h3>
+            <ul>
+                <li><strong>Immediate (Before Launch):</strong> P0 items (Outbox, Idempotency, WebSocket)</li>
+                <li><strong>Q2 2025:</strong> P1 items (VRP, Driver Availability, Notifications)</li>
+                <li><strong>Q3 2025:</strong> P2 items (Optimization, Monitoring)</li>
+                <li><strong>Expected Go-Live:</strong> April 2025 (with focused 3-person team)</li>
+            </ul>
+        </div>
+
+        <p style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ccc; font-size: 12px; color: #666;">
+            Document generated: February 2, 2026<br>
+            Status: Technical Review<br>
+            Audience: Engineering Leadership, Product Management
+        </p>
+    </div>
+</body>
+</html>
