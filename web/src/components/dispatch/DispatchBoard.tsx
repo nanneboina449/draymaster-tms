@@ -1,391 +1,690 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  DispatchBoardItem, LoadStatus, DISPATCH_COLUMNS, 
-  LOAD_STATUS_LABELS, TERMINAL_LABELS 
-} from '@/lib/types';
-import { getDispatchBoard, updateLoadStatus } from '@/lib/supabase';
-import LoadDetailPanel from './LoadDetailPanel';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
-// Status to column mapping
-const STATUS_COLUMNS: Record<string, LoadStatus[]> = {
-  TRACKING: ['TRACKING'],
-  AVAILABLE: ['AVAILABLE'],
-  HOLD: ['HOLD'],
-  NEEDS_APPT: ['APPOINTMENT_NEEDED'],
-  READY: ['READY_FOR_DISPATCH'],
-  DISPATCHED: ['DISPATCHED', 'IN_TRANSIT', 'AT_PICKUP', 'AT_DELIVERY', 'RETURNING'],
-  IN_YARD: ['IN_YARD'],
-  COMPLETED: ['COMPLETED'],
+// =============================================================================
+// SIMPLE DISPATCH BOARD - Clean Redesign
+// =============================================================================
+//
+// Core Concept:
+//   A LOAD (container) goes through MOVES until complete
+//   IMPORT: Pick from terminal → Deliver to customer → Return empty
+//   EXPORT: Pick empty → Load at customer → Deliver to terminal
+//
+// Dispatcher's Job:
+//   1. See what needs dispatching (sorted by LFD urgency)
+//   2. Click Dispatch → Select driver → Send message
+//   3. Track active moves → Mark complete
+//
+// =============================================================================
+
+// ===== TYPES =====
+
+interface Load {
+  id: string;
+  container_number: string;
+  size: string;
+  shipment_id: string;
+  shipment_type: 'IMPORT' | 'EXPORT';
+  customer_name: string;
+  terminal_name: string;
+  steamship_line: string;
+  booking_number?: string;
+  last_free_day: string | null;
+  delivery_address: string;
+  delivery_city: string;
+  is_hazmat: boolean;
+  is_overweight: boolean;
+  customs_status: string;
+  // Current dispatch state
+  active_move?: Move;
+  completed_moves: Move[];
+  journey_complete: boolean;
+}
+
+interface Move {
+  id: string;
+  type: string;
+  status: 'PENDING' | 'DISPATCHED' | 'IN_PROGRESS' | 'COMPLETED';
+  driver_id?: string;
+  driver_name?: string;
+  pickup: string;
+  delivery: string;
+  dispatched_at?: string;
+  completed_at?: string;
+}
+
+interface Driver {
+  id: string;
+  name: string;
+  phone: string;
+  available: boolean;
+  has_hazmat: boolean;
+}
+
+// ===== CONSTANTS =====
+
+const JOURNEY = {
+  IMPORT: [
+    { type: 'PICKUP', label: 'Pick Up from Terminal', icon: '📥', fromKey: 'terminal', toKey: 'customer' },
+    { type: 'EMPTY_RETURN', label: 'Return Empty', icon: '📤', fromKey: 'customer', toKey: 'terminal' },
+  ],
+  EXPORT: [
+    { type: 'EMPTY_PICKUP', label: 'Pick Up Empty', icon: '📦', fromKey: 'terminal', toKey: 'customer' },
+    { type: 'DELIVER', label: 'Deliver Loaded', icon: '🚢', fromKey: 'customer', toKey: 'terminal' },
+  ],
 };
 
-const COLUMN_CONFIG = [
-  { id: 'TRACKING', label: 'Tracking', color: 'gray', statuses: ['TRACKING'] },
-  { id: 'AVAILABLE', label: 'Available', color: 'green', statuses: ['AVAILABLE'] },
-  { id: 'HOLD', label: 'On Hold', color: 'yellow', statuses: ['HOLD'] },
-  { id: 'NEEDS_APPT', label: 'Needs Appt', color: 'orange', statuses: ['APPOINTMENT_NEEDED'] },
-  { id: 'READY', label: 'Ready', color: 'blue', statuses: ['READY_FOR_DISPATCH'] },
-  { id: 'DISPATCHED', label: 'In Progress', color: 'indigo', statuses: ['DISPATCHED', 'IN_TRANSIT', 'AT_PICKUP', 'AT_DELIVERY', 'RETURNING'] },
-  { id: 'IN_YARD', label: 'In Yard', color: 'purple', statuses: ['IN_YARD'] },
-  { id: 'COMPLETED', label: 'Completed', color: 'emerald', statuses: ['COMPLETED'] },
-];
+// ===== HELPERS =====
 
-const COLUMN_COLORS: Record<string, string> = {
-  gray: 'bg-gray-100 border-gray-300',
-  green: 'bg-green-50 border-green-300',
-  yellow: 'bg-yellow-50 border-yellow-300',
-  orange: 'bg-orange-50 border-orange-300',
-  blue: 'bg-blue-50 border-blue-300',
-  indigo: 'bg-indigo-50 border-indigo-300',
-  purple: 'bg-purple-50 border-purple-300',
-  emerald: 'bg-emerald-50 border-emerald-300',
-};
+function daysUntilLFD(lfd: string | null): number | null {
+  if (!lfd) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(lfd).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
 
-const HEADER_COLORS: Record<string, string> = {
-  gray: 'bg-gray-500',
-  green: 'bg-green-500',
-  yellow: 'bg-yellow-500',
-  orange: 'bg-orange-500',
-  blue: 'bg-blue-500',
-  indigo: 'bg-indigo-500',
-  purple: 'bg-purple-500',
-  emerald: 'bg-emerald-500',
-};
+function lfdBadge(days: number | null) {
+  if (days === null) return null;
+  if (days < 0) return { text: 'OVERDUE', color: 'bg-red-600 text-white' };
+  if (days === 0) return { text: 'TODAY', color: 'bg-red-500 text-white' };
+  if (days === 1) return { text: 'TOMORROW', color: 'bg-orange-500 text-white' };
+  if (days <= 3) return { text: `${days} days`, color: 'bg-yellow-500 text-white' };
+  return { text: `${days} days`, color: 'bg-gray-200 text-gray-700' };
+}
+
+// ===== LOAD CARD =====
+
+function LoadCard({
+  load,
+  onDispatch,
+  onComplete,
+}: {
+  load: Load;
+  onDispatch: () => void;
+  onComplete: () => void;
+}) {
+  const days = daysUntilLFD(load.last_free_day);
+  const badge = lfdBadge(days);
+  const journey = JOURNEY[load.shipment_type];
+
+  // Which step are we on?
+  const completedTypes = load.completed_moves.map(m => m.type);
+  const stepIndex = completedTypes.length;
+  const nextStep = journey[stepIndex];
+  const isComplete = load.journey_complete;
+
+  return (
+    <div className={`bg-white rounded-lg border-2 p-4 transition-all ${
+      load.active_move ? 'border-blue-400 shadow-md' :
+      isComplete ? 'border-green-400 opacity-60' :
+      days !== null && days <= 1 ? 'border-red-400 shadow-lg' :
+      'border-gray-200 hover:border-gray-300'
+    }`}>
+      {/* Header */}
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xl font-bold">{load.container_number}</span>
+            {load.is_hazmat && <span title="HAZMAT">☣️</span>}
+            {load.is_overweight && <span title="Overweight">⚖️</span>}
+          </div>
+          <div className="text-sm text-gray-500">
+            {load.size}' • {load.steamship_line}
+          </div>
+        </div>
+        <div className="text-right">
+          <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+            load.shipment_type === 'IMPORT' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'
+          }`}>
+            {load.shipment_type}
+          </span>
+          {badge && (
+            <div className={`mt-1 px-2 py-1 text-xs font-bold rounded ${badge.color}`}>
+              LFD: {badge.text}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Customer & Terminal */}
+      <div className="text-sm mb-3">
+        <div className="font-medium text-gray-900">{load.customer_name}</div>
+        <div className="text-gray-500">{load.terminal_name}</div>
+      </div>
+
+      {/* Hold Warning */}
+      {load.customs_status === 'HOLD' && (
+        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          ⛔ CUSTOMS HOLD - Cannot dispatch
+        </div>
+      )}
+
+      {/* Journey Progress */}
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-2">
+          {journey.map((step, idx) => {
+            const done = idx < stepIndex;
+            const active = load.active_move?.type === step.type;
+            const next = idx === stepIndex && !load.active_move;
+
+            return (
+              <div key={step.type} className="flex items-center flex-1">
+                <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                  done ? 'bg-green-500 text-white' :
+                  active ? 'bg-blue-500 text-white ring-4 ring-blue-200' :
+                  next ? 'bg-gray-200 text-gray-600' :
+                  'bg-gray-100 text-gray-400'
+                }`}>
+                  {done ? '✓' : active ? '→' : step.icon}
+                </div>
+                {idx < journey.length - 1 && (
+                  <div className={`flex-1 h-1 mx-1 rounded ${done ? 'bg-green-500' : 'bg-gray-200'}`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="text-xs text-gray-500 text-center">
+          {journey.map((s, i) => (
+            <span key={s.type}>
+              {i > 0 && ' → '}
+              <span className={i < stepIndex ? 'line-through' : i === stepIndex ? 'font-bold text-gray-700' : ''}>
+                {s.label}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Action Area */}
+      <div className="pt-3 border-t">
+        {isComplete ? (
+          <div className="text-center text-green-600 font-medium">✓ Journey Complete</div>
+        ) : load.active_move ? (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">{load.active_move.driver_name || 'No driver'}</div>
+              <div className="text-xs text-gray-500">
+                {load.active_move.pickup} → {load.active_move.delivery}
+              </div>
+            </div>
+            <button
+              onClick={onComplete}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+            >
+              ✓ Mark Complete
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onDispatch}
+            disabled={load.customs_status === 'HOLD'}
+            className="w-full py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+          >
+            🚛 Dispatch: {nextStep?.label}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===== DISPATCH MODAL =====
+
+function DispatchModal({
+  load,
+  drivers,
+  onSend,
+  onClose,
+}: {
+  load: Load;
+  drivers: Driver[];
+  onSend: (driverId: string) => void;
+  onClose: () => void;
+}) {
+  const journey = JOURNEY[load.shipment_type];
+  const stepIndex = load.completed_moves.length;
+  const step = journey[stepIndex];
+
+  const [selectedDriver, setSelectedDriver] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
+
+  const driver = drivers.find(d => d.id === selectedDriver);
+
+  // Get locations
+  const pickup = step.fromKey === 'terminal' ? load.terminal_name : (load.delivery_city || load.delivery_address);
+  const delivery = step.toKey === 'terminal' ? load.terminal_name : (load.delivery_city || load.delivery_address);
+
+  // Build message
+  const message = `🚛 DISPATCH
+
+${step.icon} ${step.label.toUpperCase()}
+
+Container: ${load.container_number} (${load.size}')
+${load.is_hazmat ? '☣️ HAZMAT LOAD\n' : ''}${load.is_overweight ? '⚖️ OVERWEIGHT\n' : ''}
+📍 PICKUP: ${pickup}
+📍 DELIVER: ${delivery}
+
+Customer: ${load.customer_name}
+SSL: ${load.steamship_line}
+${load.booking_number ? `Booking: ${load.booking_number}\n` : ''}${load.last_free_day ? `LFD: ${new Date(load.last_free_day).toLocaleDateString()}\n` : ''}
+Reply YES to confirm.`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+        {/* Header */}
+        <div className="bg-indigo-600 text-white px-6 py-4">
+          <h2 className="text-lg font-semibold">Dispatch Load</h2>
+          <p className="text-indigo-200 text-sm">{load.container_number} • {step.label}</p>
+        </div>
+
+        {!showPreview ? (
+          <>
+            {/* Route Info */}
+            <div className="p-6 border-b">
+              <div className="flex items-center text-sm mb-4">
+                <div className="w-3 h-3 rounded-full bg-green-500 mr-2" />
+                <span className="font-medium">{pickup}</span>
+              </div>
+              <div className="ml-1 border-l-2 border-dashed border-gray-300 h-6 mb-1" />
+              <div className="flex items-center text-sm">
+                <div className="w-3 h-3 rounded-full bg-red-500 mr-2" />
+                <span className="font-medium">{delivery}</span>
+              </div>
+            </div>
+
+            {/* Driver Selection */}
+            <div className="p-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Select Driver</label>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {drivers.filter(d => d.available).map(d => (
+                  <button
+                    key={d.id}
+                    onClick={() => setSelectedDriver(d.id)}
+                    className={`w-full p-3 rounded-lg border-2 text-left transition ${
+                      selectedDriver === d.id
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{d.name}</div>
+                        <div className="text-sm text-gray-500">{d.phone}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {d.has_hazmat && (
+                          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">HAZMAT</span>
+                        )}
+                        <div className="w-3 h-3 rounded-full bg-green-500" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {drivers.filter(d => d.available).length === 0 && (
+                  <p className="text-center text-gray-500 py-4">No drivers available</p>
+                )}
+              </div>
+              {load.is_hazmat && driver && !driver.has_hazmat && (
+                <p className="mt-3 text-sm text-red-600">⚠️ This load requires HAZMAT endorsement</p>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Message Preview */
+          <div className="p-6">
+            <p className="text-sm text-gray-500 mb-2">Message to {driver?.name}:</p>
+            <div className="bg-gray-900 text-green-400 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap">
+              {message}
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="px-6 py-4 bg-gray-50 flex justify-between">
+          <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:text-gray-800">
+            Cancel
+          </button>
+          {!showPreview ? (
+            <button
+              onClick={() => setShowPreview(true)}
+              disabled={!selectedDriver}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
+            >
+              Preview Message →
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowPreview(false)}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-100"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => onSend(selectedDriver)}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                🚛 Send Dispatch
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== MAIN BOARD =====
 
 export default function DispatchBoard() {
-  const [loads, setLoads] = useState<DispatchBoardItem[]>([]);
+  const [loads, setLoads] = useState<Load[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedLoad, setSelectedLoad] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'ALL' | 'IMPORT' | 'EXPORT' | 'URGENT'>('ALL');
-  const [draggedItem, setDraggedItem] = useState<string | null>(null);
+  const [dispatchingLoad, setDispatchingLoad] = useState<Load | null>(null);
+  const [view, setView] = useState<'dispatch' | 'active' | 'complete'>('dispatch');
 
-  useEffect(() => {
-    loadData();
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Get containers with shipment data
+      const { data: containers } = await supabase
+        .from('containers')
+        .select(`
+          *,
+          shipment:shipments!shipment_id(
+            id, type, customer_name, terminal_name, steamship_line,
+            booking_number, last_free_day, delivery_address, delivery_city
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      // Get all moves (orders) for these containers
+      const { data: orders } = await supabase
+        .from('orders')
+        .select(`
+          id, container_id, move_type_v2, status, assigned_driver_id,
+          pickup_city, delivery_city, dispatched_at, completed_at,
+          driver:drivers!assigned_driver_id(first_name, last_name)
+        `)
+        .is('deleted_at', null);
+
+      // Group orders by container
+      const orderMap = new Map<string, any[]>();
+      (orders || []).forEach((o: any) => {
+        const list = orderMap.get(o.container_id) || [];
+        list.push(o);
+        orderMap.set(o.container_id, list);
+      });
+
+      // Build loads
+      const loadList: Load[] = (containers || []).map((c: any) => {
+        const moves = orderMap.get(c.id) || [];
+        const active = moves.find((m: any) => ['DISPATCHED', 'IN_PROGRESS'].includes(m.status));
+        const completed = moves.filter((m: any) => m.status === 'COMPLETED');
+
+        const journey = JOURNEY[c.shipment?.type as 'IMPORT' | 'EXPORT'] || JOURNEY.IMPORT;
+        const completedTypes = completed.map((m: any) => m.move_type_v2);
+        const journeyComplete = journey.every(step => completedTypes.includes(step.type));
+
+        return {
+          id: c.id,
+          container_number: c.container_number,
+          size: c.size,
+          shipment_id: c.shipment?.id,
+          shipment_type: c.shipment?.type || 'IMPORT',
+          customer_name: c.shipment?.customer_name || 'N/A',
+          terminal_name: c.shipment?.terminal_name || 'N/A',
+          steamship_line: c.shipment?.steamship_line || '',
+          booking_number: c.shipment?.booking_number,
+          last_free_day: c.shipment?.last_free_day,
+          delivery_address: c.shipment?.delivery_address || '',
+          delivery_city: c.shipment?.delivery_city || '',
+          is_hazmat: c.is_hazmat,
+          is_overweight: c.is_overweight,
+          customs_status: c.customs_status,
+          active_move: active ? {
+            id: active.id,
+            type: active.move_type_v2,
+            status: active.status,
+            driver_id: active.assigned_driver_id,
+            driver_name: active.driver ? `${active.driver.first_name} ${active.driver.last_name}` : undefined,
+            pickup: active.pickup_city || '',
+            delivery: active.delivery_city || '',
+            dispatched_at: active.dispatched_at,
+          } : undefined,
+          completed_moves: completed.map((m: any) => ({
+            id: m.id,
+            type: m.move_type_v2,
+            status: 'COMPLETED',
+            pickup: m.pickup_city || '',
+            delivery: m.delivery_city || '',
+            completed_at: m.completed_at,
+          })),
+          journey_complete: journeyComplete,
+        };
+      });
+
+      // Sort by LFD urgency
+      loadList.sort((a, b) => {
+        const da = daysUntilLFD(a.last_free_day) ?? 999;
+        const db = daysUntilLFD(b.last_free_day) ?? 999;
+        return da - db;
+      });
+
+      setLoads(loadList);
+
+      // Get drivers
+      const { data: driverData } = await supabase
+        .from('drivers')
+        .select('id, first_name, last_name, phone, status, has_hazmat_endorsement')
+        .in('status', ['ACTIVE', 'AVAILABLE']);
+
+      setDrivers((driverData || []).map((d: any) => ({
+        id: d.id,
+        name: `${d.first_name} ${d.last_name}`,
+        phone: d.phone || '',
+        available: true,
+        has_hazmat: d.has_hazmat_endorsement || false,
+      })));
+
+    } catch (err) {
+      console.error('Error loading data:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const loadData = async () => {
-    setLoading(true);
-    const data = await getDispatchBoard();
-    setLoads(data as any);
-    setLoading(false);
-  };
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
-  // Group loads by column
-  const getColumnLoads = (columnId: string): DispatchBoardItem[] => {
-    const column = COLUMN_CONFIG.find(c => c.id === columnId);
-    if (!column) return [];
+  // Dispatch handler
+  const handleDispatch = async (driverId: string) => {
+    if (!dispatchingLoad) return;
 
-    let filtered = loads.filter(load => column.statuses.includes(load.status));
+    const journey = JOURNEY[dispatchingLoad.shipment_type];
+    const stepIndex = dispatchingLoad.completed_moves.length;
+    const step = journey[stepIndex];
 
-    // Apply filter
-    if (filter === 'URGENT') {
-      filtered = filtered.filter(load => 
-        load.lfd_urgency === 'OVERDUE' || load.lfd_urgency === 'TOMORROW'
-      );
-    }
+    const pickup = step.fromKey === 'terminal'
+      ? dispatchingLoad.terminal_name
+      : dispatchingLoad.delivery_city;
+    const delivery = step.toKey === 'terminal'
+      ? dispatchingLoad.terminal_name
+      : dispatchingLoad.delivery_city;
 
-    return filtered;
-  };
+    try {
+      await supabase.from('orders').insert({
+        order_number: `ORD-${Date.now().toString(36).toUpperCase()}`,
+        container_id: dispatchingLoad.id,
+        shipment_id: dispatchingLoad.shipment_id,
+        type: dispatchingLoad.shipment_type,
+        move_type_v2: step.type,
+        assigned_driver_id: driverId,
+        pickup_city: pickup,
+        delivery_city: delivery,
+        status: 'DISPATCHED',
+        dispatched_at: new Date().toISOString(),
+      });
 
-  // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, loadId: string) => {
-    setDraggedItem(loadId);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetColumnId: string) => {
-    e.preventDefault();
-    if (!draggedItem) return;
-
-    const column = COLUMN_CONFIG.find(c => c.id === targetColumnId);
-    if (!column || column.statuses.length === 0) return;
-
-    // Get the primary status for this column
-    const newStatus = column.statuses[0] as LoadStatus;
-
-    // Update status
-    const success = await updateLoadStatus(draggedItem, newStatus);
-    if (success) {
-      await loadData();
-    }
-
-    setDraggedItem(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedItem(null);
-  };
-
-  // Get urgency badge
-  const getUrgencyBadge = (load: DispatchBoardItem) => {
-    switch (load.lfd_urgency) {
-      case 'OVERDUE':
-        return <span className="px-2 py-0.5 text-xs font-bold bg-red-600 text-white rounded">OVERDUE</span>;
-      case 'TOMORROW':
-        return <span className="px-2 py-0.5 text-xs font-bold bg-red-500 text-white rounded">LFD TOMORROW</span>;
-      case 'SOON':
-        return <span className="px-2 py-0.5 text-xs font-bold bg-orange-500 text-white rounded">LFD {load.days_until_lfd}d</span>;
-      default:
-        return null;
+      setDispatchingLoad(null);
+      fetchData();
+    } catch (err: any) {
+      alert('Error: ' + err.message);
     }
   };
 
-  // Get hold badges
-  const getHoldBadges = (load: DispatchBoardItem) => {
-    const holds = [];
-    if (load.hold_customs) holds.push('CUSTOMS');
-    if (load.hold_freight) holds.push('FREIGHT');
-    if (load.hold_usda) holds.push('USDA');
-    if (load.hold_tmf) holds.push('TMF');
-    
-    if (holds.length === 0) return null;
-    
+  // Complete handler
+  const handleComplete = async (load: Load) => {
+    if (!load.active_move) return;
+
+    try {
+      await supabase.from('orders').update({
+        status: 'COMPLETED',
+        completed_at: new Date().toISOString(),
+      }).eq('id', load.active_move.id);
+
+      fetchData();
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  // Filter loads by view
+  const filtered = loads.filter(l => {
+    if (view === 'dispatch') return !l.active_move && !l.journey_complete;
+    if (view === 'active') return !!l.active_move;
+    if (view === 'complete') return l.journey_complete;
+    return true;
+  });
+
+  // Stats
+  const needsDispatch = loads.filter(l => !l.active_move && !l.journey_complete).length;
+  const active = loads.filter(l => l.active_move).length;
+  const complete = loads.filter(l => l.journey_complete).length;
+  const urgent = loads.filter(l => {
+    const d = daysUntilLFD(l.last_free_day);
+    return d !== null && d <= 2 && !l.journey_complete;
+  }).length;
+
+  if (loading && loads.length === 0) {
     return (
-      <div className="flex flex-wrap gap-1 mt-1">
-        {holds.map(hold => (
-          <span key={hold} className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">
-            ⛔ {hold}
-          </span>
-        ))}
-      </div>
-    );
-  };
-
-  // Count urgent items
-  const urgentCount = loads.filter(l => 
-    l.lfd_urgency === 'OVERDUE' || l.lfd_urgency === 'TOMORROW'
-  ).length;
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent"></div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
+      <div className="bg-white border-b sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold text-gray-900">Dispatch Board</h1>
-            <p className="text-sm text-gray-500">
-              {new Date().toLocaleDateString('en-US', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            {/* Filter buttons */}
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => setFilter('ALL')}
-                className={`px-3 py-1.5 text-sm rounded-md transition ${
-                  filter === 'ALL' 
-                    ? 'bg-white shadow text-gray-900' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All ({loads.length})
-              </button>
-              <button
-                onClick={() => setFilter('URGENT')}
-                className={`px-3 py-1.5 text-sm rounded-md transition flex items-center gap-1 ${
-                  filter === 'URGENT' 
-                    ? 'bg-red-500 shadow text-white' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                🚨 Urgent ({urgentCount})
-              </button>
-            </div>
-            
-            {/* Refresh button */}
             <button
-              onClick={loadData}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+              onClick={fetchData}
+              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Refresh
+              ↻ Refresh
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Kanban Board */}
-      <div className="flex-1 overflow-x-auto p-4 bg-gray-100">
-        <div className="flex gap-4 h-full min-w-max">
-          {COLUMN_CONFIG.map(column => {
-            const columnLoads = getColumnLoads(column.id);
-            
-            return (
-              <div
-                key={column.id}
-                className={`w-80 flex flex-col rounded-lg border-2 ${COLUMN_COLORS[column.color]} overflow-hidden`}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, column.id)}
-              >
-                {/* Column Header */}
-                <div className={`${HEADER_COLORS[column.color]} px-4 py-3 text-white`}>
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">{column.label}</h3>
-                    <span className="px-2 py-0.5 bg-white/20 rounded-full text-sm">
-                      {columnLoads.length}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Column Content */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {columnLoads.length === 0 ? (
-                    <div className="text-center py-8 text-gray-400 text-sm">
-                      No loads
-                    </div>
-                  ) : (
-                    columnLoads.map(load => (
-                      <div
-                        key={load.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, load.id)}
-                        onDragEnd={handleDragEnd}
-                        onClick={() => setSelectedLoad(load.id)}
-                        className={`bg-white rounded-lg shadow-sm border p-3 cursor-pointer hover:shadow-md transition ${
-                          draggedItem === load.id ? 'opacity-50' : ''
-                        } ${selectedLoad === load.id ? 'ring-2 ring-blue-500' : ''}`}
-                      >
-                        {/* Container number and move type */}
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-mono font-bold text-sm text-gray-900">
-                            {load.container_number || load.load_number}
-                          </span>
-                          <span className={`px-2 py-0.5 text-xs rounded ${
-                            load.move_type === 'LIVE' ? 'bg-blue-100 text-blue-700' :
-                            load.move_type === 'DROP' ? 'bg-purple-100 text-purple-700' :
-                            load.move_type === 'PREPULL' ? 'bg-orange-100 text-orange-700' :
-                            load.move_type === 'STREET_TURN' ? 'bg-green-100 text-green-700' :
-                            'bg-gray-100 text-gray-700'
-                          }`}>
-                            {load.move_type}
-                          </span>
-                        </div>
-
-                        {/* Customer */}
-                        <div className="text-sm text-gray-600 mb-1">
-                          {load.customer_name}
-                        </div>
-
-                        {/* Terminal */}
-                        <div className="text-xs text-gray-500 mb-2 flex items-center gap-1">
-                          <span>🚢</span>
-                          {TERMINAL_LABELS[load.terminal || ''] || load.terminal}
-                        </div>
-
-                        {/* LFD */}
-                        {load.last_free_day && (
-                          <div className="text-xs mb-2 flex items-center gap-2">
-                            <span className="text-gray-500">LFD:</span>
-                            <span className={`font-semibold ${
-                              load.lfd_urgency === 'OVERDUE' ? 'text-red-600' :
-                              load.lfd_urgency === 'TOMORROW' ? 'text-red-500' :
-                              load.lfd_urgency === 'SOON' ? 'text-orange-500' :
-                              'text-gray-700'
-                            }`}>
-                              {new Date(load.last_free_day).toLocaleDateString()}
-                            </span>
-                            {getUrgencyBadge(load)}
-                          </div>
-                        )}
-
-                        {/* Holds */}
-                        {getHoldBadges(load)}
-
-                        {/* Appointments */}
-                        {(load.terminal_appointment_date || load.delivery_appointment_date) && (
-                          <div className="mt-2 pt-2 border-t text-xs space-y-1">
-                            {load.terminal_appointment_date && (
-                              <div className="flex items-center gap-1 text-gray-600">
-                                <span>🏭</span>
-                                <span>
-                                  {new Date(load.terminal_appointment_date).toLocaleDateString()}
-                                  {load.terminal_appointment_time && ` ${load.terminal_appointment_time}`}
-                                </span>
-                              </div>
-                            )}
-                            {load.delivery_appointment_date && (
-                              <div className="flex items-center gap-1 text-gray-600">
-                                <span>📦</span>
-                                <span>
-                                  {new Date(load.delivery_appointment_date).toLocaleDateString()}
-                                  {load.delivery_appointment_time && ` ${load.delivery_appointment_time}`}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Driver (if dispatched) */}
-                        {load.driver_name && (
-                          <div className="mt-2 pt-2 border-t">
-                            <div className="flex items-center gap-2 text-sm">
-                              <span className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-bold">
-                                {load.driver_name.charAt(0)}
-                              </span>
-                              <span className="text-gray-700">{load.driver_name}</span>
-                              {load.truck_number && (
-                                <span className="text-gray-400">• {load.truck_number}</span>
-                              )}
-                            </div>
-                            {load.trip_status && (
-                              <div className="mt-1">
-                                <span className={`text-xs px-2 py-0.5 rounded ${
-                                  load.trip_status === 'AT_PICKUP' ? 'bg-yellow-100 text-yellow-700' :
-                                  load.trip_status === 'AT_DELIVERY' ? 'bg-green-100 text-green-700' :
-                                  load.trip_status === 'EN_ROUTE' ? 'bg-blue-100 text-blue-700' :
-                                  'bg-gray-100 text-gray-700'
-                                }`}>
-                                  {load.trip_status.replace(/_/g, ' ')}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* In Yard indicator */}
-                        {load.in_yard && (
-                          <div className="mt-2 flex items-center gap-1 text-xs text-purple-600">
-                            <span>🏗️</span>
-                            <span>In Yard</span>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
+          {/* Tabs */}
+          <div className="flex gap-4">
+            <button
+              onClick={() => setView('dispatch')}
+              className={`px-4 py-3 rounded-lg font-medium transition ${
+                view === 'dispatch'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              🚛 Needs Dispatch ({needsDispatch})
+            </button>
+            <button
+              onClick={() => setView('active')}
+              className={`px-4 py-3 rounded-lg font-medium transition ${
+                view === 'active'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              📍 Active ({active})
+            </button>
+            <button
+              onClick={() => setView('complete')}
+              className={`px-4 py-3 rounded-lg font-medium transition ${
+                view === 'complete'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              ✓ Complete ({complete})
+            </button>
+            {urgent > 0 && (
+              <div className="ml-auto px-4 py-3 bg-red-100 text-red-700 rounded-lg font-medium">
+                🔥 {urgent} Urgent (LFD ≤ 2 days)
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Load Detail Panel */}
-      {selectedLoad && (
-        <LoadDetailPanel
-          loadId={selectedLoad}
-          onClose={() => setSelectedLoad(null)}
-          onUpdate={loadData}
+      {/* Content */}
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(load => (
+            <LoadCard
+              key={load.id}
+              load={load}
+              onDispatch={() => setDispatchingLoad(load)}
+              onComplete={() => handleComplete(load)}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <div className="col-span-full text-center py-16 text-gray-500">
+              {view === 'dispatch' && 'All loads dispatched!'}
+              {view === 'active' && 'No active dispatches'}
+              {view === 'complete' && 'No completed loads yet'}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Drivers Summary (bottom-right) */}
+      <div className="fixed bottom-6 right-6 bg-white rounded-xl shadow-lg border p-4 w-64">
+        <h3 className="font-semibold text-gray-900 mb-3">Available Drivers</h3>
+        <div className="space-y-2">
+          {drivers.filter(d => d.available).slice(0, 5).map(d => (
+            <div key={d.id} className="flex items-center justify-between text-sm">
+              <span>{d.name}</span>
+              <div className="flex items-center gap-1">
+                {d.has_hazmat && <span className="text-xs text-purple-600">HM</span>}
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              </div>
+            </div>
+          ))}
+          {drivers.filter(d => d.available).length === 0 && (
+            <p className="text-sm text-gray-500">No drivers available</p>
+          )}
+        </div>
+      </div>
+
+      {/* Dispatch Modal */}
+      {dispatchingLoad && (
+        <DispatchModal
+          load={dispatchingLoad}
+          drivers={drivers}
+          onSend={handleDispatch}
+          onClose={() => setDispatchingLoad(null)}
         />
       )}
     </div>
