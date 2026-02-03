@@ -1790,7 +1790,7 @@ export async function createShipmentWithOrders(
   return shipment;
 }
 
-// Create orders for a container based on shipment type
+// Create orders (loads) for a container based on shipment type
 async function createOrdersForContainer(
   shipmentId: string,
   containerId: string,
@@ -1816,8 +1816,8 @@ async function createOrdersForContainer(
     : null;
 
   if (shipmentType === 'IMPORT') {
-    // Order 1: Import Delivery (terminal → customer)
-    await supabase.from('orders').insert({
+    // Load 1: Import Delivery (terminal → customer)
+    const { error: order1Error } = await supabase.from('orders').insert({
       order_number: orderNumber(),
       shipment_id: shipmentId,
       container_id: containerId,
@@ -1837,9 +1837,14 @@ async function createOrdersForContainer(
       delivery_appointment_required: deliveryInfo?.appointmentRequired || false,
     });
 
-    // If DROP type, create Order 2: Empty Return
+    if (order1Error) {
+      console.error('Error creating IMPORT_DELIVERY load:', order1Error);
+      throw new Error(`Failed to create import delivery load: ${order1Error.message}`);
+    }
+
+    // If DROP type, create Load 2: Empty Return
     if (tripExecutionType === 'DROP' || tripExecutionType === 'DROP_AND_HOOK') {
-      await supabase.from('orders').insert({
+      const { error: order2Error } = await supabase.from('orders').insert({
         order_number: orderNumber(),
         shipment_id: shipmentId,
         container_id: containerId,
@@ -1855,10 +1860,15 @@ async function createOrdersForContainer(
         pickup_state: deliveryInfo?.state,
         pickup_zip: deliveryInfo?.zip,
       });
+
+      if (order2Error) {
+        console.error('Error creating EMPTY_RETURN load:', order2Error);
+        throw new Error(`Failed to create empty return load: ${order2Error.message}`);
+      }
     }
   } else if (shipmentType === 'EXPORT') {
-    // Order 1: Empty Pickup (terminal → customer)
-    await supabase.from('orders').insert({
+    // Load 1: Empty Pickup (terminal → customer)
+    const { error: order1Error } = await supabase.from('orders').insert({
       order_number: orderNumber(),
       shipment_id: shipmentId,
       container_id: containerId,
@@ -1874,8 +1884,13 @@ async function createOrdersForContainer(
       delivery_zip: deliveryInfo?.zip,
     });
 
-    // Order 2: Export Pickup (customer → terminal)
-    await supabase.from('orders').insert({
+    if (order1Error) {
+      console.error('Error creating EMPTY_PICKUP load:', order1Error);
+      throw new Error(`Failed to create empty pickup load: ${order1Error.message}`);
+    }
+
+    // Load 2: Export Pickup (customer → terminal)
+    const { error: order2Error } = await supabase.from('orders').insert({
       order_number: orderNumber(),
       shipment_id: shipmentId,
       container_id: containerId,
@@ -1892,6 +1907,11 @@ async function createOrdersForContainer(
       pickup_appointment: deliveryAppointment,
       pickup_appointment_required: deliveryInfo?.appointmentRequired || false,
     });
+
+    if (order2Error) {
+      console.error('Error creating EXPORT_PICKUP load:', order2Error);
+      throw new Error(`Failed to create export pickup load: ${order2Error.message}`);
+    }
   }
 }
 

@@ -41,20 +41,21 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Prevent duplicate container assignments in orders
--- First, resolve any existing duplicates by keeping only the most recent order per container
+-- Prevent duplicate container assignments for SAME move type in orders
+-- A container can have multiple orders (e.g., IMPORT_DELIVERY + EMPTY_RETURN)
+-- but should not have duplicate orders for the same move type
 DO $$
 DECLARE
     dup_record RECORD;
 BEGIN
-    -- Find containers with multiple active orders
+    -- Find containers with multiple active orders OF THE SAME MOVE TYPE
     FOR dup_record IN
-        SELECT container_id, array_agg(id ORDER BY created_at DESC) as order_ids
+        SELECT container_id, move_type_v2, array_agg(id ORDER BY created_at DESC) as order_ids
         FROM orders
         WHERE container_id IS NOT NULL
           AND deleted_at IS NULL
           AND status NOT IN ('CANCELLED', 'COMPLETED')
-        GROUP BY container_id
+        GROUP BY container_id, move_type_v2
         HAVING COUNT(*) > 1
     LOOP
         -- Cancel all but the most recent order (first in array after DESC sort)
@@ -64,16 +65,22 @@ BEGIN
         WHERE id = ANY(dup_record.order_ids[2:])
           AND status NOT IN ('CANCELLED', 'COMPLETED');
 
-        RAISE NOTICE 'Resolved duplicate orders for container_id %: kept %, cancelled %',
+        RAISE NOTICE 'Resolved duplicate orders for container_id % move_type %: kept %, cancelled %',
             dup_record.container_id,
+            dup_record.move_type_v2,
             dup_record.order_ids[1],
             dup_record.order_ids[2:];
     END LOOP;
 END $$;
 
--- Now create the unique index
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_container_active
-    ON orders(container_id)
+-- Drop the old too-restrictive index if it exists
+DROP INDEX IF EXISTS idx_orders_container_active;
+
+-- Create unique index on container_id + move_type_v2
+-- This allows multiple orders per container (e.g., IMPORT_DELIVERY + EMPTY_RETURN)
+-- but prevents duplicate orders of the SAME move type for a container
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_container_move_type_active
+    ON orders(container_id, move_type_v2)
     WHERE deleted_at IS NULL AND status NOT IN ('CANCELLED', 'COMPLETED');
 
 -- Unique invoice number
