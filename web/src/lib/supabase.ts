@@ -734,8 +734,9 @@ export async function getShipments(): Promise<Shipment[]> {
         orders:orders(id, status, order_number, move_type_v2, sequence_number)
       )
     `)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false });
-  if (error) { console.error('Error:', error); return []; }
+  if (error) { console.error('Error fetching shipments:', error); return []; }
   return data || [];
 }
 
@@ -1730,8 +1731,11 @@ export async function createShipmentWithOrders(
     appointmentTime?: string;
   }
 ): Promise<Shipment | null> {
-  // 1. Create shipment
+  // 1. Create shipment (this is the "order" from customer perspective)
   const referenceNumber = `SHP-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+
+  console.log('Creating shipment with data:', { ...shipmentData, reference_number: referenceNumber });
+
   const { data: shipment, error: shipmentError } = await supabase
     .from('shipments')
     .insert({
@@ -1744,11 +1748,15 @@ export async function createShipmentWithOrders(
 
   if (shipmentError || !shipment) {
     console.error('Error creating shipment:', shipmentError);
-    return null;
+    throw new Error(`Failed to create order: ${shipmentError?.message || 'Unknown error'}`);
   }
 
-  // 2. Create containers and orders for each
+  console.log('Shipment created successfully:', shipment.id);
+
+  // 2. Create containers and loads for each
   for (const container of containers) {
+    console.log('Creating container:', container.container_number);
+
     // Create container
     const { data: containerData, error: containerError } = await supabase
       .from('containers')
@@ -1773,10 +1781,12 @@ export async function createShipmentWithOrders(
 
     if (containerError || !containerData) {
       console.error('Error creating container:', containerError);
-      continue;
+      throw new Error(`Failed to create container: ${containerError?.message || 'Unknown error'}`);
     }
 
-    // 3. Create orders based on shipment type and trip execution type
+    console.log('Container created:', containerData.id);
+
+    // 3. Create loads (orders) based on shipment type and trip execution type
     const tripType = shipmentData.trip_type || 'LIVE_UNLOAD';
     await createOrdersForContainer(
       shipment.id,
@@ -1785,8 +1795,11 @@ export async function createShipmentWithOrders(
       tripType,
       deliveryInfo
     );
+
+    console.log('Loads created for container:', containerData.id);
   }
 
+  console.log('Order creation complete. Shipment ID:', shipment.id);
   return shipment;
 }
 
